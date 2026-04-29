@@ -26,3 +26,15 @@ compile_commands.json
 .idea/
 *.swp
 *.swo
+
+# Python / benchmark outputs
+.venv/
+.cache/
+__pycache__/
+*.pyc
+results/
+scripts/
+
+# Misc
+build-msys/
+INTERNAL.md
