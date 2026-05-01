@@ -47,6 +47,18 @@ set(ART_PAPER6_INDEXED_SOURCES
     src/node32.c
     src/node64.c)
 
+set(ART_COUNT5_SOURCES
+    ${ART_SOURCES}
+    src/node32.c
+    src/node64.c)
+
+set(ART_COUNT7_SOURCES
+    ${ART_SOURCES}
+    src/node2.c
+    src/node5.c
+    src/node32.c
+    src/node64.c)
+
 function(configure_art_target target_name)
     target_include_directories(${target_name}
         PUBLIC
@@ -110,6 +122,39 @@ configure_art_target(art_node256_only)
 target_compile_definitions(art_node256_only
     PRIVATE
         ART_MENU_NODE256_ONLY)
+
+function(add_count_art_library target_name menu_definition)
+    add_library(${target_name} STATIC ${ARGN})
+    configure_art_target(${target_name})
+    target_compile_definitions(${target_name}
+        PRIVATE
+            ${menu_definition})
+endfunction()
+
+add_count_art_library(art_count1_node256
+    ART_MENU_COUNT1_NODE256
+    ${ART_SOURCES})
+add_count_art_library(art_count2_16_256
+    ART_MENU_COUNT2_16_256
+    ${ART_SOURCES})
+add_count_art_library(art_count3_4_16_256
+    ART_MENU_COUNT3_4_16_256
+    ${ART_SOURCES})
+add_count_art_library(art_count4_original4
+    ART_MENU_COUNT4_ORIGINAL4
+    ${ART_SOURCES})
+add_count_art_library(art_count5_4_16_32_64_256
+    ART_MENU_COUNT5_4_16_32_64_256
+    ${ART_COUNT5_SOURCES})
+add_count_art_library(art_count6_4_16_32_48_64_256
+    ART_MENU_COUNT6_4_16_32_48_64_256
+    ${ART_COUNT5_SOURCES})
+add_count_art_library(art_count6_paper6
+    ART_MENU_COUNT6_PAPER6
+    ${ART_COUNT7_SOURCES})
+add_count_art_library(art_count7_2_5_16_32_48_64_256
+    ART_MENU_COUNT7_2_5_16_32_48_64_256
+    ${ART_COUNT7_SOURCES})
 
 enable_testing()
 
@@ -228,6 +273,56 @@ target_compile_definitions(test_correctness_node256_only
         ART_EXPECT_NODE256_ONLY)
 
 add_test(NAME test_correctness_node256_only COMMAND test_correctness_node256_only)
+
+function(add_count_correctness target_name library_name)
+    add_executable(${target_name}
+        tests/test_correctness.c)
+
+    target_link_libraries(${target_name}
+        PRIVATE
+            ${library_name})
+
+    target_compile_definitions(${target_name}
+        PRIVATE
+            ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+            ${ARGN})
+
+    add_test(NAME ${target_name} COMMAND ${target_name})
+endfunction()
+
+add_count_correctness(test_correctness_count1_node256
+    art_count1_node256
+    ART_EXPECT_NODE256_ONLY)
+add_count_correctness(test_correctness_count2_16_256
+    art_count2_16_256
+    ART_EXPECT_COUNT2_16_256)
+add_count_correctness(test_correctness_count3_4_16_256
+    art_count3_4_16_256
+    ART_EXPECT_COUNT3_4_16_256)
+add_count_correctness(test_correctness_count4_original4
+    art_count4_original4)
+add_count_correctness(test_correctness_count5_4_16_32_64_256
+    art_count5_4_16_32_64_256
+    ART_EXPECT_NODE32
+    ART_EXPECT_NODE64
+    ART_EXPECT_COUNT5_4_16_32_64_256)
+add_count_correctness(test_correctness_count6_4_16_32_48_64_256
+    art_count6_4_16_32_48_64_256
+    ART_EXPECT_NODE32
+    ART_EXPECT_NODE64)
+add_count_correctness(test_correctness_count6_paper6
+    art_count6_paper6
+    ART_EXPECT_NODE2
+    ART_EXPECT_NODE5
+    ART_EXPECT_NODE32
+    ART_EXPECT_NODE64)
+add_count_correctness(test_correctness_count7_2_5_16_32_48_64_256
+    art_count7_2_5_16_32_48_64_256
+    ART_EXPECT_NODE2
+    ART_EXPECT_NODE5
+    ART_EXPECT_NODE32
+    ART_EXPECT_NODE64
+    ART_EXPECT_COUNT7_2_5_16_32_48_64_256)
 
 add_executable(bench_original
     bench/bench_original.c)
@@ -363,6 +458,50 @@ target_compile_definitions(bench_node256_only
     PRIVATE
         ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
         ART_BENCH_VARIANT=\"node256_only\")
+
+function(add_count_benchmark target_name library_name variant_name)
+    add_executable(${target_name}
+        bench/bench_original.c)
+
+    target_link_libraries(${target_name}
+        PRIVATE
+            ${library_name})
+    if(NOT MSVC)
+        target_link_libraries(${target_name}
+            PRIVATE
+                m)
+    endif()
+
+    target_compile_definitions(${target_name}
+        PRIVATE
+            ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+            ART_BENCH_VARIANT=\"${variant_name}\")
+endfunction()
+
+add_count_benchmark(bench_count1_node256
+    art_count1_node256
+    count1_node256)
+add_count_benchmark(bench_count2_16_256
+    art_count2_16_256
+    count2_node16_node256)
+add_count_benchmark(bench_count3_4_16_256
+    art_count3_4_16_256
+    count3_node4_node16_node256)
+add_count_benchmark(bench_count4_original4
+    art_count4_original4
+    count4_original4)
+add_count_benchmark(bench_count5_4_16_32_64_256
+    art_count5_4_16_32_64_256
+    count5_4_16_32_64_256)
+add_count_benchmark(bench_count6_4_16_32_48_64_256
+    art_count6_4_16_32_48_64_256
+    count6_4_16_32_48_64_256)
+add_count_benchmark(bench_count6_paper6
+    art_count6_paper6
+    count6_paper6)
+add_count_benchmark(bench_count7_2_5_16_32_48_64_256
+    art_count7_2_5_16_32_48_64_256
+    count7_2_5_16_32_48_64_256)
 
 function(add_scan_benchmark target_name art_target variant_name)
     add_executable(${target_name}

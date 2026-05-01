@@ -346,6 +346,126 @@ static void test_node256_only_targets(void) {
 #endif
 }
 
+static void build_shared_fanout(art_tree *t, uintptr_t *values, int n, unsigned char prefix) {
+    assert(art_tree_init(t) == 0);
+    for (int i = 0; i < n; ++i) {
+        unsigned char key[3] = { prefix, (unsigned char)(i + 1), 0 };
+        values[i] = (uintptr_t)(i + 1);
+        assert(art_insert(t, key, sizeof(key), &values[i]) == NULL);
+    }
+}
+
+static void assert_shared_lookup(art_tree *t, uintptr_t *values, int n, unsigned char prefix) {
+    for (int i = 0; i < n; ++i) {
+        unsigned char key[3] = { prefix, (unsigned char)(i + 1), 0 };
+        assert(art_search(t, key, sizeof(key)) == &values[i]);
+    }
+}
+
+static void test_count2_menu_targets(void) {
+#ifdef ART_EXPECT_COUNT2_16_256
+    for (int pass = 0; pass < 3; ++pass) {
+        int n = pass == 0 ? 2 : pass == 1 ? 16 : 17;
+        art_tree t;
+        uintptr_t values[17];
+        art_stats stats;
+        build_shared_fanout(&t, values, n, (unsigned char)(0xa0 + pass));
+        assert(art_collect_stats(&t, &stats) == 0);
+        assert(stats.fanout_hist[n] == 1);
+        if (n <= 16) {
+            assert(stats.node16_count > 0);
+            assert(stats.node256_count == 0);
+        } else {
+            assert(stats.node256_count > 0);
+        }
+        assert_shared_lookup(&t, values, n, (unsigned char)(0xa0 + pass));
+        assert(art_tree_destroy(&t) == 0);
+    }
+
+    {
+        enum { N = 17 };
+        art_tree t;
+        uintptr_t values[N];
+        art_stats stats;
+        build_shared_fanout(&t, values, N, 0xa4);
+        for (int i = N - 1; i >= 1; --i) {
+            unsigned char key[3] = { 0xa4, (unsigned char)(i + 1), 0 };
+            assert(art_delete(&t, key, sizeof(key)) == &values[i]);
+        }
+        assert(art_size(&t) == 1);
+        assert(art_collect_stats(&t, &stats) == 0);
+        assert(stats.internal_node_count == 0);
+        assert_shared_lookup(&t, values, 1, 0xa4);
+        assert(art_tree_destroy(&t) == 0);
+    }
+#endif
+}
+
+static void test_count3_menu_targets(void) {
+#ifdef ART_EXPECT_COUNT3_4_16_256
+    int ns[] = { 4, 16, 17 };
+    for (int pass = 0; pass < 3; ++pass) {
+        int n = ns[pass];
+        art_tree t;
+        uintptr_t values[17];
+        art_stats stats;
+        build_shared_fanout(&t, values, n, (unsigned char)(0xb0 + pass));
+        assert(art_collect_stats(&t, &stats) == 0);
+        assert(stats.fanout_hist[n] == 1);
+        if (n == 4) assert(stats.node4_count > 0);
+        if (n == 16) assert(stats.node16_count > 0);
+        if (n == 17) assert(stats.node256_count > 0);
+        assert_shared_lookup(&t, values, n, (unsigned char)(0xb0 + pass));
+        assert(art_tree_destroy(&t) == 0);
+    }
+#endif
+}
+
+static void test_count5_menu_targets(void) {
+#ifdef ART_EXPECT_COUNT5_4_16_32_64_256
+    int ns[] = { 24, 40, 48, 65 };
+    for (int pass = 0; pass < 4; ++pass) {
+        int n = ns[pass];
+        art_tree t;
+        uintptr_t values[65];
+        art_stats stats;
+        build_shared_fanout(&t, values, n, (unsigned char)(0xc0 + pass));
+        assert(art_collect_stats(&t, &stats) == 0);
+        assert(stats.fanout_hist[n] == 1);
+        if (n == 24) assert(stats.node32_count > 0);
+        if (n == 40 || n == 48) {
+            assert(stats.node64_count > 0);
+            assert(stats.node48_count == 0);
+        }
+        if (n == 65) assert(stats.node256_count > 0);
+        assert_shared_lookup(&t, values, n, (unsigned char)(0xc0 + pass));
+        assert(art_tree_destroy(&t) == 0);
+    }
+#endif
+}
+
+static void test_count7_menu_targets(void) {
+#ifdef ART_EXPECT_COUNT7_2_5_16_32_48_64_256
+    int ns[] = { 2, 5, 24, 40, 64 };
+    for (int pass = 0; pass < 5; ++pass) {
+        int n = ns[pass];
+        art_tree t;
+        uintptr_t values[64];
+        art_stats stats;
+        build_shared_fanout(&t, values, n, (unsigned char)(0xd0 + pass));
+        assert(art_collect_stats(&t, &stats) == 0);
+        assert(stats.fanout_hist[n] == 1);
+        if (n == 2) assert(stats.node2_count > 0);
+        if (n == 5) assert(stats.node5_count > 0);
+        if (n == 24) assert(stats.node32_count > 0);
+        if (n == 40) assert(stats.node48_count > 0);
+        if (n == 64) assert(stats.node64_count > 0);
+        assert_shared_lookup(&t, values, n, (unsigned char)(0xd0 + pass));
+        assert(art_tree_destroy(&t) == 0);
+    }
+#endif
+}
+
 static void test_words_fixture_smoke(void) {
     char path[4096];
     snprintf(path, sizeof(path), "%s/tests/words.txt", ART_PROJECT_SOURCE_DIR);
@@ -390,6 +510,10 @@ int main(void) {
     test_paper6_small_shrink();
     test_high_fanout_growth_and_shrink();
     test_node256_only_targets();
+    test_count2_menu_targets();
+    test_count3_menu_targets();
+    test_count5_menu_targets();
+    test_count7_menu_targets();
     test_words_fixture_smoke();
     puts("test_correctness: PASS");
     return 0;

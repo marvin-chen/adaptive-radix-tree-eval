@@ -17,7 +17,7 @@ void art_compress_single_child(art_node *n, art_node **ref, unsigned char key, a
 #if ART_HAS_NODE2
 art_node** art_node2_find_child(art_node2 *n, unsigned char c);
 void art_node2_add_child(art_node2 *n, unsigned char c, void *child);
-void art_node2_remove_child(art_node2 *n, art_node **ref, art_node **slot);
+void art_node2_remove_child(art_node2 *n, art_node **slot);
 art_node* art_node2_first_child(const art_node2 *n);
 art_node* art_node2_last_child(const art_node2 *n);
 int art_node2_for_each_child(art_node2 *n, art_child_cb cb, void *data);
@@ -25,7 +25,7 @@ int art_node2_for_each_child(art_node2 *n, art_child_cb cb, void *data);
 
 art_node** art_node4_find_child(art_node4 *n, unsigned char c);
 void art_node4_add_child(art_node4 *n, unsigned char c, void *child);
-void art_node4_remove_child(art_node4 *n, art_node **ref, art_node **slot);
+void art_node4_remove_child(art_node4 *n, art_node **slot);
 art_node* art_node4_first_child(const art_node4 *n);
 art_node* art_node4_last_child(const art_node4 *n);
 int art_node4_for_each_child(art_node4 *n, art_child_cb cb, void *data);

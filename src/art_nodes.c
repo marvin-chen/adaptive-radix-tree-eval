@@ -192,6 +192,108 @@ static void art_shrink_node(art_node *n, art_node **ref) {
     free(n);
 }
 
+static int art_only_child(const art_node *n, unsigned char *key, art_node **child) {
+    if (n->num_children != 1) return 0;
+
+    switch (n->type) {
+#if ART_HAS_NODE2
+        case NODE2: {
+            const art_node2 *node = (const art_node2*)n;
+            *key = node->keys[0];
+            *child = node->children[0];
+            return 1;
+        }
+#endif
+        case NODE4: {
+            const art_node4 *node = (const art_node4*)n;
+            *key = node->keys[0];
+            *child = node->children[0];
+            return 1;
+        }
+#if ART_HAS_NODE5
+        case NODE5: {
+            const art_node5 *node = (const art_node5*)n;
+            *key = node->keys[0];
+            *child = node->children[0];
+            return 1;
+        }
+#endif
+        case NODE16: {
+            const art_node16 *node = (const art_node16*)n;
+            *key = node->keys[0];
+            *child = node->children[0];
+            return 1;
+        }
+#if ART_HAS_NODE32
+        case NODE32: {
+            const art_node32 *node = (const art_node32*)n;
+            *key = node->keys[0];
+            *child = node->children[0];
+            return 1;
+        }
+#endif
+        case NODE48: {
+            const art_node48 *node = (const art_node48*)n;
+            for (int i = 0; i < 256; i++) {
+                int pos = node->keys[i];
+                if (pos) {
+                    *key = (unsigned char)i;
+                    *child = node->children[pos - 1];
+                    return 1;
+                }
+            }
+            return 0;
+        }
+#if ART_HAS_NODE64
+        case NODE64: {
+            const art_node64 *node = (const art_node64*)n;
+#if ART_NODE64_INDEXED
+            for (int i = 0; i < 256; i++) {
+                int pos = node->keys[i];
+                if (pos) {
+                    *key = (unsigned char)i;
+                    *child = node->children[pos - 1];
+                    return 1;
+                }
+            }
+#else
+            for (int i = 0; i < 256; i++) {
+                if (node->bitmap[i >> 6] & (UINT64_C(1) << (i & 63))) {
+                    *key = (unsigned char)i;
+                    *child = node->children[0];
+                    return 1;
+                }
+            }
+#endif
+            return 0;
+        }
+#endif
+        case NODE256: {
+            const art_node256 *node = (const art_node256*)n;
+            for (int i = 0; i < 256; i++) {
+                if (node->children[i]) {
+                    *key = (unsigned char)i;
+                    *child = node->children[i];
+                    return 1;
+                }
+            }
+            return 0;
+        }
+        default:
+            abort();
+    }
+}
+
+static int art_try_compress_min_node(art_node *n, art_node **ref) {
+    unsigned char key = 0;
+    art_node *child = NULL;
+
+    if (n->type != art_menu_min_type()) return 0;
+    if (!art_only_child(n, &key, &child)) return 0;
+    art_compress_single_child(n, ref, key, child);
+    return 1;
+}
+
 void art_compress_single_child(art_node *n, art_node **ref, unsigned char key, art_node *child) {
     if (!IS_LEAF(child)) {
         // Concatenate the prefixes.
@@ -228,12 +330,12 @@ void art_remove_child(art_node *n, art_node **ref, unsigned char c, art_node **s
     switch (n->type) {
 #if ART_HAS_NODE2
         case NODE2:
-            art_node2_remove_child((art_node2*)n, ref, slot);
-            return;
+            art_node2_remove_child((art_node2*)n, slot);
+            break;
 #endif
         case NODE4:
-            art_node4_remove_child((art_node4*)n, ref, slot);
-            return;
+            art_node4_remove_child((art_node4*)n, slot);
+            break;
 #if ART_HAS_NODE5
         case NODE5:
             art_node5_remove_child((art_node5*)n, slot);
@@ -261,6 +363,8 @@ void art_remove_child(art_node *n, art_node **ref, unsigned char c, art_node **s
         default:
             abort();
     }
+
+    if (art_try_compress_min_node(n, ref)) return;
     art_shrink_node(n, ref);
 }
 

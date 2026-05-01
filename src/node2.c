@@ -33,16 +33,12 @@ void art_node2_add_child(art_node2 *n, unsigned char c, void *child) {
     n->n.num_children++;
 }
 
-void art_node2_remove_child(art_node2 *n, art_node **ref, art_node **slot) {
+void art_node2_remove_child(art_node2 *n, art_node **slot) {
     int pos = slot - n->children;
     memmove(n->keys + pos, n->keys + pos + 1, n->n.num_children - 1 - pos);
     memmove(n->children + pos, n->children + pos + 1,
             (n->n.num_children - 1 - pos) * sizeof(void*));
     n->n.num_children--;
-
-    if (n->n.num_children == 1) {
-        art_compress_single_child((art_node*)n, ref, n->keys[0], n->children[0]);
-    }
 }
 
 art_node* art_node2_first_child(const art_node2 *n) {
