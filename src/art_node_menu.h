@@ -5,8 +5,6 @@
 
 #if !defined(ART_MENU_ORIGINAL4) && \
     !defined(ART_MENU_NODE32_ARRAY) && \
-    !defined(ART_MENU_NODE64_BITMAP) && \
-    !defined(ART_MENU_NODE32_NODE64) && \
     !defined(ART_MENU_NODE64_INDEXED) && \
     !defined(ART_MENU_NODE32_NODE64_INDEXED) && \
     !defined(ART_MENU_PAPER6_INDEXED) && \
@@ -38,8 +36,6 @@
 
 #if defined(ART_MENU_ORIGINAL4) || \
     defined(ART_MENU_NODE32_ARRAY) || \
-    defined(ART_MENU_NODE64_BITMAP) || \
-    defined(ART_MENU_NODE32_NODE64) || \
     defined(ART_MENU_NODE64_INDEXED) || \
     defined(ART_MENU_NODE32_NODE64_INDEXED) || \
     defined(ART_MENU_COUNT3_4_16_256) || \
@@ -58,7 +54,6 @@
 #endif
 
 #if defined(ART_MENU_NODE32_ARRAY) || \
-    defined(ART_MENU_NODE32_NODE64) || \
     defined(ART_MENU_NODE32_NODE64_INDEXED) || \
     defined(ART_MENU_PAPER6_INDEXED) || \
     defined(ART_MENU_COUNT5_4_16_32_64_256) || \
@@ -72,8 +67,6 @@
 
 #if defined(ART_MENU_ORIGINAL4) || \
     defined(ART_MENU_NODE32_ARRAY) || \
-    defined(ART_MENU_NODE64_BITMAP) || \
-    defined(ART_MENU_NODE32_NODE64) || \
     defined(ART_MENU_NODE64_INDEXED) || \
     defined(ART_MENU_NODE32_NODE64_INDEXED) || \
     defined(ART_MENU_COUNT4_ORIGINAL4) || \
@@ -84,9 +77,7 @@
 #define ART_HAS_NODE48 0
 #endif
 
-#if defined(ART_MENU_NODE64_BITMAP) || \
-    defined(ART_MENU_NODE32_NODE64) || \
-    defined(ART_MENU_NODE64_INDEXED) || \
+#if defined(ART_MENU_NODE64_INDEXED) || \
     defined(ART_MENU_NODE32_NODE64_INDEXED) || \
     defined(ART_MENU_PAPER6_INDEXED) || \
     defined(ART_MENU_COUNT5_4_16_32_64_256) || \
@@ -96,24 +87,6 @@
 #define ART_HAS_NODE64 1
 #else
 #define ART_HAS_NODE64 0
-#endif
-
-#if defined(ART_MENU_NODE64_INDEXED) || \
-    defined(ART_MENU_NODE32_NODE64_INDEXED) || \
-    defined(ART_MENU_PAPER6_INDEXED) || \
-    defined(ART_MENU_COUNT5_4_16_32_64_256) || \
-    defined(ART_MENU_COUNT6_4_16_32_48_64_256) || \
-    defined(ART_MENU_COUNT6_PAPER6) || \
-    defined(ART_MENU_COUNT7_2_5_16_32_48_64_256)
-#define ART_NODE64_INDEXED 1
-#else
-#define ART_NODE64_INDEXED 0
-#endif
-
-#if ART_HAS_NODE64 && !ART_NODE64_INDEXED
-#define ART_NODE64_BITMAP 1
-#else
-#define ART_NODE64_BITMAP 0
 #endif
 
 static inline uint8_t art_menu_min_type(void) {

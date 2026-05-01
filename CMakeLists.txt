@@ -31,15 +31,6 @@ set(ART_NODE32_NODE64_SOURCES
     src/node32.c
     src/node64.c)
 
-set(ART_NODE64_BITMAP_SOURCES
-    ${ART_SOURCES}
-    src/node64_bitmap.c)
-
-set(ART_NODE32_NODE64_BITMAP_SOURCES
-    ${ART_SOURCES}
-    src/node32.c
-    src/node64_bitmap.c)
-
 set(ART_PAPER6_INDEXED_SOURCES
     ${ART_SOURCES}
     src/node2.c
@@ -98,18 +89,6 @@ configure_art_target(art_node32_node64)
 target_compile_definitions(art_node32_node64
     PRIVATE
         ART_MENU_NODE32_NODE64_INDEXED)
-
-add_library(art_node64_bitmap STATIC ${ART_NODE64_BITMAP_SOURCES})
-configure_art_target(art_node64_bitmap)
-target_compile_definitions(art_node64_bitmap
-    PRIVATE
-        ART_MENU_NODE64_BITMAP)
-
-add_library(art_node32_node64_bitmap STATIC ${ART_NODE32_NODE64_BITMAP_SOURCES})
-configure_art_target(art_node32_node64_bitmap)
-target_compile_definitions(art_node32_node64_bitmap
-    PRIVATE
-        ART_MENU_NODE32_NODE64)
 
 add_library(art_paper6_indexed STATIC ${ART_PAPER6_INDEXED_SOURCES})
 configure_art_target(art_paper6_indexed)
@@ -199,20 +178,6 @@ target_compile_definitions(test_correctness_node64
 
 add_test(NAME test_correctness_node64 COMMAND test_correctness_node64)
 
-add_executable(test_correctness_node64_bitmap
-    tests/test_correctness.c)
-
-target_link_libraries(test_correctness_node64_bitmap
-    PRIVATE
-        art_node64_bitmap)
-
-target_compile_definitions(test_correctness_node64_bitmap
-    PRIVATE
-        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
-        ART_EXPECT_NODE64)
-
-add_test(NAME test_correctness_node64_bitmap COMMAND test_correctness_node64_bitmap)
-
 add_executable(test_correctness_node32_node64
     tests/test_correctness.c)
 
@@ -227,21 +192,6 @@ target_compile_definitions(test_correctness_node32_node64
         ART_EXPECT_NODE64)
 
 add_test(NAME test_correctness_node32_node64 COMMAND test_correctness_node32_node64)
-
-add_executable(test_correctness_node32_node64_bitmap
-    tests/test_correctness.c)
-
-target_link_libraries(test_correctness_node32_node64_bitmap
-    PRIVATE
-        art_node32_node64_bitmap)
-
-target_compile_definitions(test_correctness_node32_node64_bitmap
-    PRIVATE
-        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
-        ART_EXPECT_NODE32
-        ART_EXPECT_NODE64)
-
-add_test(NAME test_correctness_node32_node64_bitmap COMMAND test_correctness_node32_node64_bitmap)
 
 add_executable(test_correctness_paper6_indexed
     tests/test_correctness.c)
@@ -374,23 +324,6 @@ target_compile_definitions(bench_node64
         ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
         ART_BENCH_VARIANT=\"node64\")
 
-add_executable(bench_node64_bitmap
-    bench/bench_original.c)
-
-target_link_libraries(bench_node64_bitmap
-    PRIVATE
-        art_node64_bitmap)
-if(NOT MSVC)
-    target_link_libraries(bench_node64_bitmap
-        PRIVATE
-            m)
-endif()
-
-target_compile_definitions(bench_node64_bitmap
-    PRIVATE
-        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
-        ART_BENCH_VARIANT=\"node64_bitmap\")
-
 add_executable(bench_node32_node64
     bench/bench_original.c)
 
@@ -407,23 +340,6 @@ target_compile_definitions(bench_node32_node64
     PRIVATE
         ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
         ART_BENCH_VARIANT=\"node32_node64\")
-
-add_executable(bench_node32_node64_bitmap
-    bench/bench_original.c)
-
-target_link_libraries(bench_node32_node64_bitmap
-    PRIVATE
-        art_node32_node64_bitmap)
-if(NOT MSVC)
-    target_link_libraries(bench_node32_node64_bitmap
-        PRIVATE
-            m)
-endif()
-
-target_compile_definitions(bench_node32_node64_bitmap
-    PRIVATE
-        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
-        ART_BENCH_VARIANT=\"node32_node64_bitmap\")
 
 add_executable(bench_paper6_indexed
     bench/bench_original.c)
@@ -641,12 +557,6 @@ if(ART_BUILD_UPSTREAM_TESTS)
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     endfunction()
 
-    add_upstream_check_variant(test_art_upstream_node64_bitmap
-        art_node64_bitmap
-        ART_MENU_NODE64_BITMAP)
-    add_upstream_check_variant(test_art_upstream_node32_node64_bitmap
-        art_node32_node64_bitmap
-        ART_MENU_NODE32_NODE64)
     add_upstream_check_variant(test_art_upstream_paper6_indexed
         art_paper6_indexed
         ART_MENU_PAPER6_INDEXED)

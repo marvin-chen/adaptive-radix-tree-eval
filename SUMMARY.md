@@ -98,16 +98,6 @@ children[32]
 It delays promotion from Node16 to Node48 for fanouts 17-32. This can save
 memory, but lookup requires key comparison rather than direct indexing.
 
-Added `Node64Bitmap`:
-
-```text
-bitmap[4]
-children[64]
-```
-
-It delays promotion from Node48 to Node256 for fanouts 49-64 using compact
-bitmap/rank lookup.
-
 Added `Node64Indexed`:
 
 ```text
@@ -115,8 +105,8 @@ keys[256]
 children[64]
 ```
 
-It also covers fanouts 49-64, but uses direct indexed lookup like Node48. This
-is expected to be faster than Node64Bitmap but larger.
+It covers fanouts 49-64 and uses direct indexed lookup like Node48. This is the
+current Node64 representation used by all active Node64 variants.
 
 Added `Node2` and `Node5`:
 
@@ -152,14 +142,6 @@ bench_node32_node64:
 node32_node64
 Node4 -> Node16 -> Node32KeyArray -> Node48 -> Node64Indexed -> Node256
 
-bench_node64_bitmap:
-node64_bitmap
-Node4 -> Node16 -> Node48 -> Node64Bitmap -> Node256
-
-bench_node32_node64_bitmap:
-node32_node64_bitmap
-Node4 -> Node16 -> Node32KeyArray -> Node48 -> Node64Bitmap -> Node256
-
 bench_paper6_indexed:
 paper6_indexed
 Node2 -> Node5 -> Node16 -> Node32KeyArray -> Node64Indexed -> Node256
@@ -167,14 +149,48 @@ Node2 -> Node5 -> Node16 -> Node32KeyArray -> Node64Indexed -> Node256
 bench_node256_only:
 node256_only
 Node256
+
+bench_count1_node256:
+count1_node256
+Node256
+
+bench_count2_16_256:
+count2_node16_node256
+Node16 -> Node256
+
+bench_count3_4_16_256:
+count3_node4_node16_node256
+Node4 -> Node16 -> Node256
+
+bench_count4_original4:
+count4_original4
+Node4 -> Node16 -> Node48 -> Node256
+
+bench_count5_4_16_32_64_256:
+count5_4_16_32_64_256
+Node4 -> Node16 -> Node32KeyArray -> Node64Indexed -> Node256
+
+bench_count6_4_16_32_48_64_256:
+count6_4_16_32_48_64_256
+Node4 -> Node16 -> Node32KeyArray -> Node48 -> Node64Indexed -> Node256
+
+bench_count6_paper6:
+count6_paper6
+Node2 -> Node5 -> Node16 -> Node32KeyArray -> Node64Indexed -> Node256
+
+bench_count7_2_5_16_32_48_64_256:
+count7_2_5_16_32_48_64_256
+Node2 -> Node5 -> Node16 -> Node32KeyArray -> Node48 -> Node64Indexed -> Node256
 ```
 
 The menu is selected with CMake compile definitions such as:
 
 ```cmake
 ART_MENU_NODE64_INDEXED
+ART_MENU_NODE32_NODE64_INDEXED
 ART_MENU_PAPER6_INDEXED
 ART_MENU_NODE256_ONLY
+ART_MENU_COUNT6_PAPER6
 ```
 
 ## Benchmark Pipeline

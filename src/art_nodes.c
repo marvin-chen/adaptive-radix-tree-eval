@@ -137,19 +137,10 @@ static void art_copy_children(const art_node *src, art_node *dst) {
 #if ART_HAS_NODE64
         case NODE64: {
             const art_node64 *n = (const art_node64*)src;
-#if ART_NODE64_INDEXED
             for (int i = 0; i < 256; i++) {
                 int pos = n->keys[i];
                 if (pos) art_add_child_local(dst, (unsigned char)i, n->children[pos - 1]);
             }
-#else
-            int child = 0;
-            for (int i = 0; i < 256; i++) {
-                if (n->bitmap[i >> 6] & (UINT64_C(1) << (i & 63))) {
-                    art_add_child_local(dst, (unsigned char)i, n->children[child++]);
-                }
-            }
-#endif
             return;
         }
 #endif
@@ -247,7 +238,6 @@ static int art_only_child(const art_node *n, unsigned char *key, art_node **chil
 #if ART_HAS_NODE64
         case NODE64: {
             const art_node64 *node = (const art_node64*)n;
-#if ART_NODE64_INDEXED
             for (int i = 0; i < 256; i++) {
                 int pos = node->keys[i];
                 if (pos) {
@@ -256,15 +246,6 @@ static int art_only_child(const art_node *n, unsigned char *key, art_node **chil
                     return 1;
                 }
             }
-#else
-            for (int i = 0; i < 256; i++) {
-                if (node->bitmap[i >> 6] & (UINT64_C(1) << (i & 63))) {
-                    *key = (unsigned char)i;
-                    *child = node->children[0];
-                    return 1;
-                }
-            }
-#endif
             return 0;
         }
 #endif

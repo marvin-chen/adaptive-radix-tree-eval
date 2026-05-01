@@ -2,7 +2,7 @@
 
 #include <stdlib.h>
 
-#if ART_HAS_NODE64 && ART_NODE64_INDEXED
+#if ART_HAS_NODE64
 
 art_node** art_node64_find_child(art_node64 *n, unsigned char c) {
     int i = n->keys[c];

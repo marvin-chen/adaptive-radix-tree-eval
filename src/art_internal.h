@@ -100,22 +100,14 @@ typedef struct {
 } art_node48;
 
 /*
- * Node with 64 children. The representation is selected by the menu build.
+ * Indexed node with 64 children.
  */
 #if ART_HAS_NODE64
-#if ART_NODE64_INDEXED
 typedef struct {
     art_node n;
     unsigned char keys[256];
     art_node *children[64];
 } art_node64;
-#else
-typedef struct {
-    art_node n;
-    uint64_t bitmap[4];
-    art_node *children[64];
-} art_node64;
-#endif
 #endif
 
 /*
