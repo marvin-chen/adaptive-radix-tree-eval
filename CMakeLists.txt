@@ -364,6 +364,26 @@ target_compile_definitions(bench_node256_only
         ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
         ART_BENCH_VARIANT=\"node256_only\")
 
+function(add_scan_benchmark target_name art_target variant_name)
+    add_executable(${target_name}
+        bench/bench_scan.c)
+
+    target_link_libraries(${target_name}
+        PRIVATE
+            ${art_target})
+
+    target_compile_definitions(${target_name}
+        PRIVATE
+            ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+            ART_BENCH_VARIANT=\"${variant_name}\")
+endfunction()
+
+add_scan_benchmark(bench_scan_original art original4)
+add_scan_benchmark(bench_scan_node64 art_node64 node64)
+add_scan_benchmark(bench_scan_node32_node64 art_node32_node64 node32_node64)
+add_scan_benchmark(bench_scan_paper6_indexed art_paper6_indexed paper6_indexed)
+add_scan_benchmark(bench_scan_node256_only art_node256_only node256_only)
+
 if(ART_BUILD_UPSTREAM_TESTS)
     find_path(CHECK_INCLUDE_DIR check.h)
     find_library(CHECK_LIBRARY check)

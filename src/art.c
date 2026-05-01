@@ -573,6 +573,10 @@ int art_iter(art_tree *t, art_callback cb, void *data) {
  * @return 0 on success.
  */
 static int leaf_prefix_matches(const art_leaf *n, const unsigned char *prefix, int prefix_len) {
+    if (!n) {
+        return 1;
+    }
+
     // Fail if the key length is too short.
     if (n->key_len < (uint32_t)prefix_len) {
         return 1;
@@ -600,6 +604,10 @@ int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_call
     int prefix_len;
     int depth = 0;
 
+    if (key_len <= 0) {
+        return recursive_iter(n, cb, data);
+    }
+
     while (n) {
         // Might be a leaf.
         if (IS_LEAF(n)) {
@@ -612,13 +620,9 @@ int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_call
             return 0;
         }
 
-        // If the depth matches the prefix, we need to handle this node.
-        if (depth == key_len) {
-            art_leaf *l = minimum(n);
-            if (!leaf_prefix_matches(l, key, key_len)) {
-                return recursive_iter(n, cb, data);
-            }
-            return 0;
+        // If the prefix has been consumed, we need to handle this node.
+        if (depth >= key_len) {
+            return recursive_iter(n, cb, data);
         }
 
         // Bail if the prefix does not match.
@@ -635,7 +639,7 @@ int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_call
                 return 0;
 
             // If we've matched the prefix, iterate on this node.
-            } else if (depth + prefix_len == key_len) {
+            } else if (depth + prefix_len >= key_len) {
                 return recursive_iter(n, cb, data);
             }
 
@@ -644,6 +648,9 @@ int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_call
         }
 
         // Recursively search.
+        if (depth >= key_len) {
+            return recursive_iter(n, cb, data);
+        }
         child = art_find_child(n, key[depth]);
         n = child ? *child : NULL;
         depth++;
