@@ -10,7 +10,7 @@ set(CMAKE_C_EXTENSIONS ON)
 
 option(ART_BUILD_UPSTREAM_TESTS "Build the original libart Check-based tests" OFF)
 
-add_library(art STATIC
+set(ART_SOURCES
     src/art.c
     src/art_nodes.c
     src/node4.c
@@ -18,19 +18,98 @@ add_library(art STATIC
     src/node48.c
     src/node256.c)
 
-target_include_directories(art
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(ART_NODE32_SOURCES
+    ${ART_SOURCES}
+    src/node32.c)
 
+set(ART_NODE64_SOURCES
+    ${ART_SOURCES}
+    src/node64.c)
+
+set(ART_NODE32_NODE64_SOURCES
+    ${ART_SOURCES}
+    src/node32.c
+    src/node64.c)
+
+set(ART_NODE64_BITMAP_SOURCES
+    ${ART_SOURCES}
+    src/node64_bitmap.c)
+
+set(ART_NODE32_NODE64_BITMAP_SOURCES
+    ${ART_SOURCES}
+    src/node32.c
+    src/node64_bitmap.c)
+
+set(ART_PAPER6_INDEXED_SOURCES
+    ${ART_SOURCES}
+    src/node2.c
+    src/node5.c
+    src/node32.c
+    src/node64.c)
+
+function(configure_art_target target_name)
+    target_include_directories(${target_name}
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    target_compile_definitions(${target_name}
+        PRIVATE
+            _GNU_SOURCE)
+
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE /W4)
+    else()
+        target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+add_library(art STATIC ${ART_SOURCES})
+configure_art_target(art)
 target_compile_definitions(art
     PRIVATE
-        _GNU_SOURCE)
+        ART_MENU_ORIGINAL4)
 
-if(MSVC)
-    target_compile_options(art PRIVATE /W4)
-else()
-    target_compile_options(art PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+add_library(art_node32 STATIC ${ART_NODE32_SOURCES})
+configure_art_target(art_node32)
+target_compile_definitions(art_node32
+    PRIVATE
+        ART_MENU_NODE32_ARRAY)
+
+add_library(art_node64 STATIC ${ART_NODE64_SOURCES})
+configure_art_target(art_node64)
+target_compile_definitions(art_node64
+    PRIVATE
+        ART_MENU_NODE64_INDEXED)
+
+add_library(art_node32_node64 STATIC ${ART_NODE32_NODE64_SOURCES})
+configure_art_target(art_node32_node64)
+target_compile_definitions(art_node32_node64
+    PRIVATE
+        ART_MENU_NODE32_NODE64_INDEXED)
+
+add_library(art_node64_bitmap STATIC ${ART_NODE64_BITMAP_SOURCES})
+configure_art_target(art_node64_bitmap)
+target_compile_definitions(art_node64_bitmap
+    PRIVATE
+        ART_MENU_NODE64_BITMAP)
+
+add_library(art_node32_node64_bitmap STATIC ${ART_NODE32_NODE64_BITMAP_SOURCES})
+configure_art_target(art_node32_node64_bitmap)
+target_compile_definitions(art_node32_node64_bitmap
+    PRIVATE
+        ART_MENU_NODE32_NODE64)
+
+add_library(art_paper6_indexed STATIC ${ART_PAPER6_INDEXED_SOURCES})
+configure_art_target(art_paper6_indexed)
+target_compile_definitions(art_paper6_indexed
+    PRIVATE
+        ART_MENU_PAPER6_INDEXED)
+
+add_library(art_node256_only STATIC ${ART_SOURCES})
+configure_art_target(art_node256_only)
+target_compile_definitions(art_node256_only
+    PRIVATE
+        ART_MENU_NODE256_ONLY)
 
 enable_testing()
 
@@ -47,16 +126,243 @@ target_compile_definitions(test_correctness
 
 add_test(NAME test_correctness COMMAND test_correctness)
 
+add_executable(test_correctness_node32
+    tests/test_correctness.c)
+
+target_link_libraries(test_correctness_node32
+    PRIVATE
+        art_node32)
+
+target_compile_definitions(test_correctness_node32
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_EXPECT_NODE32)
+
+add_test(NAME test_correctness_node32 COMMAND test_correctness_node32)
+
+add_executable(test_correctness_node64
+    tests/test_correctness.c)
+
+target_link_libraries(test_correctness_node64
+    PRIVATE
+        art_node64)
+
+target_compile_definitions(test_correctness_node64
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_EXPECT_NODE64)
+
+add_test(NAME test_correctness_node64 COMMAND test_correctness_node64)
+
+add_executable(test_correctness_node64_bitmap
+    tests/test_correctness.c)
+
+target_link_libraries(test_correctness_node64_bitmap
+    PRIVATE
+        art_node64_bitmap)
+
+target_compile_definitions(test_correctness_node64_bitmap
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_EXPECT_NODE64)
+
+add_test(NAME test_correctness_node64_bitmap COMMAND test_correctness_node64_bitmap)
+
+add_executable(test_correctness_node32_node64
+    tests/test_correctness.c)
+
+target_link_libraries(test_correctness_node32_node64
+    PRIVATE
+        art_node32_node64)
+
+target_compile_definitions(test_correctness_node32_node64
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_EXPECT_NODE32
+        ART_EXPECT_NODE64)
+
+add_test(NAME test_correctness_node32_node64 COMMAND test_correctness_node32_node64)
+
+add_executable(test_correctness_node32_node64_bitmap
+    tests/test_correctness.c)
+
+target_link_libraries(test_correctness_node32_node64_bitmap
+    PRIVATE
+        art_node32_node64_bitmap)
+
+target_compile_definitions(test_correctness_node32_node64_bitmap
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_EXPECT_NODE32
+        ART_EXPECT_NODE64)
+
+add_test(NAME test_correctness_node32_node64_bitmap COMMAND test_correctness_node32_node64_bitmap)
+
+add_executable(test_correctness_paper6_indexed
+    tests/test_correctness.c)
+
+target_link_libraries(test_correctness_paper6_indexed
+    PRIVATE
+        art_paper6_indexed)
+
+target_compile_definitions(test_correctness_paper6_indexed
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_EXPECT_NODE2
+        ART_EXPECT_NODE5
+        ART_EXPECT_NODE32
+        ART_EXPECT_NODE64)
+
+add_test(NAME test_correctness_paper6_indexed COMMAND test_correctness_paper6_indexed)
+
+add_executable(test_correctness_node256_only
+    tests/test_correctness.c)
+
+target_link_libraries(test_correctness_node256_only
+    PRIVATE
+        art_node256_only)
+
+target_compile_definitions(test_correctness_node256_only
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_EXPECT_NODE256_ONLY)
+
+add_test(NAME test_correctness_node256_only COMMAND test_correctness_node256_only)
+
 add_executable(bench_original
     bench/bench_original.c)
 
 target_link_libraries(bench_original
     PRIVATE
         art)
+if(NOT MSVC)
+    target_link_libraries(bench_original
+        PRIVATE
+            m)
+endif()
 
 target_compile_definitions(bench_original
     PRIVATE
         ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
+
+add_executable(bench_node32
+    bench/bench_original.c)
+
+target_link_libraries(bench_node32
+    PRIVATE
+        art_node32)
+if(NOT MSVC)
+    target_link_libraries(bench_node32
+        PRIVATE
+            m)
+endif()
+
+target_compile_definitions(bench_node32
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"node32_keyarray\")
+
+add_executable(bench_node64
+    bench/bench_original.c)
+
+target_link_libraries(bench_node64
+    PRIVATE
+        art_node64)
+if(NOT MSVC)
+    target_link_libraries(bench_node64
+        PRIVATE
+            m)
+endif()
+
+target_compile_definitions(bench_node64
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"node64\")
+
+add_executable(bench_node64_bitmap
+    bench/bench_original.c)
+
+target_link_libraries(bench_node64_bitmap
+    PRIVATE
+        art_node64_bitmap)
+if(NOT MSVC)
+    target_link_libraries(bench_node64_bitmap
+        PRIVATE
+            m)
+endif()
+
+target_compile_definitions(bench_node64_bitmap
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"node64_bitmap\")
+
+add_executable(bench_node32_node64
+    bench/bench_original.c)
+
+target_link_libraries(bench_node32_node64
+    PRIVATE
+        art_node32_node64)
+if(NOT MSVC)
+    target_link_libraries(bench_node32_node64
+        PRIVATE
+            m)
+endif()
+
+target_compile_definitions(bench_node32_node64
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"node32_node64\")
+
+add_executable(bench_node32_node64_bitmap
+    bench/bench_original.c)
+
+target_link_libraries(bench_node32_node64_bitmap
+    PRIVATE
+        art_node32_node64_bitmap)
+if(NOT MSVC)
+    target_link_libraries(bench_node32_node64_bitmap
+        PRIVATE
+            m)
+endif()
+
+target_compile_definitions(bench_node32_node64_bitmap
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"node32_node64_bitmap\")
+
+add_executable(bench_paper6_indexed
+    bench/bench_original.c)
+
+target_link_libraries(bench_paper6_indexed
+    PRIVATE
+        art_paper6_indexed)
+if(NOT MSVC)
+    target_link_libraries(bench_paper6_indexed
+        PRIVATE
+            m)
+endif()
+
+target_compile_definitions(bench_paper6_indexed
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"paper6_indexed\")
+
+add_executable(bench_node256_only
+    bench/bench_original.c)
+
+target_link_libraries(bench_node256_only
+    PRIVATE
+        art_node256_only)
+if(NOT MSVC)
+    target_link_libraries(bench_node256_only
+        PRIVATE
+            m)
+endif()
+
+target_compile_definitions(bench_node256_only
+    PRIVATE
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"node256_only\")
 
 if(ART_BUILD_UPSTREAM_TESTS)
     find_path(CHECK_INCLUDE_DIR check.h)
@@ -85,4 +391,107 @@ if(ART_BUILD_UPSTREAM_TESTS)
     set_tests_properties(test_art_upstream
         PROPERTIES
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+    add_executable(test_art_upstream_node32
+        tests/runner.c)
+
+    target_include_directories(test_art_upstream_node32
+        PRIVATE
+            ${CHECK_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    target_link_libraries(test_art_upstream_node32
+        PRIVATE
+            art_node32
+            ${CHECK_LIBRARY})
+
+    target_compile_definitions(test_art_upstream_node32
+        PRIVATE
+            ART_MENU_NODE32_ARRAY)
+
+    add_test(NAME test_art_upstream_node32 COMMAND test_art_upstream_node32)
+    set_tests_properties(test_art_upstream_node32
+        PROPERTIES
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+    add_executable(test_art_upstream_node64
+        tests/runner.c)
+
+    target_include_directories(test_art_upstream_node64
+        PRIVATE
+            ${CHECK_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    target_link_libraries(test_art_upstream_node64
+        PRIVATE
+            art_node64
+            ${CHECK_LIBRARY})
+
+    target_compile_definitions(test_art_upstream_node64
+        PRIVATE
+            ART_MENU_NODE64_INDEXED)
+
+    add_test(NAME test_art_upstream_node64 COMMAND test_art_upstream_node64)
+    set_tests_properties(test_art_upstream_node64
+        PROPERTIES
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+    add_executable(test_art_upstream_node32_node64
+        tests/runner.c)
+
+    target_include_directories(test_art_upstream_node32_node64
+        PRIVATE
+            ${CHECK_INCLUDE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    target_link_libraries(test_art_upstream_node32_node64
+        PRIVATE
+            art_node32_node64
+            ${CHECK_LIBRARY})
+
+    target_compile_definitions(test_art_upstream_node32_node64
+        PRIVATE
+            ART_MENU_NODE32_NODE64_INDEXED)
+
+    add_test(NAME test_art_upstream_node32_node64 COMMAND test_art_upstream_node32_node64)
+    set_tests_properties(test_art_upstream_node32_node64
+        PROPERTIES
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+    function(add_upstream_check_variant target_name library_name menu_definition)
+        add_executable(${target_name}
+            tests/runner.c)
+
+        target_include_directories(${target_name}
+            PRIVATE
+                ${CHECK_INCLUDE_DIR}
+                ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+        target_link_libraries(${target_name}
+            PRIVATE
+                ${library_name}
+                ${CHECK_LIBRARY})
+
+        target_compile_definitions(${target_name}
+            PRIVATE
+                ${menu_definition})
+
+        add_test(NAME ${target_name} COMMAND ${target_name})
+        set_tests_properties(${target_name}
+            PROPERTIES
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    endfunction()
+
+    add_upstream_check_variant(test_art_upstream_node64_bitmap
+        art_node64_bitmap
+        ART_MENU_NODE64_BITMAP)
+    add_upstream_check_variant(test_art_upstream_node32_node64_bitmap
+        art_node32_node64_bitmap
+        ART_MENU_NODE32_NODE64)
+    add_upstream_check_variant(test_art_upstream_paper6_indexed
+        art_paper6_indexed
+        ART_MENU_PAPER6_INDEXED)
+    add_upstream_check_variant(test_art_upstream_node256_only
+        art_node256_only
+        ART_MENU_NODE256_ONLY)
 endif()

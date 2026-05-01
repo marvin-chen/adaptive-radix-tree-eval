@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-art_node** art_node4_find_child(art_node4 *n, unsigned char c) {
+#if ART_HAS_NODE2
+
+art_node** art_node2_find_child(art_node2 *n, unsigned char c) {
     for (int i = 0; i < n->n.num_children; i++) {
         /*
          * This cast works around a bug in gcc 5.1 when unrolling loops:
@@ -14,50 +16,49 @@ art_node** art_node4_find_child(art_node4 *n, unsigned char c) {
     return NULL;
 }
 
-void art_node4_add_child(art_node4 *n, unsigned char c, void *child) {
-    if (n->n.num_children >= 4) abort();
+void art_node2_add_child(art_node2 *n, unsigned char c, void *child) {
+    if (n->n.num_children >= 2) abort();
 
     int idx;
     for (idx = 0; idx < n->n.num_children; idx++) {
         if (c < n->keys[idx]) break;
     }
 
-    // Shift to make room.
     memmove(n->keys + idx + 1, n->keys + idx, n->n.num_children - idx);
     memmove(n->children + idx + 1, n->children + idx,
             (n->n.num_children - idx) * sizeof(void*));
 
-    // Insert element.
     n->keys[idx] = c;
     n->children[idx] = (art_node*)child;
     n->n.num_children++;
 }
 
-void art_node4_remove_child(art_node4 *n, art_node **ref, art_node **slot) {
+void art_node2_remove_child(art_node2 *n, art_node **ref, art_node **slot) {
     int pos = slot - n->children;
     memmove(n->keys + pos, n->keys + pos + 1, n->n.num_children - 1 - pos);
     memmove(n->children + pos, n->children + pos + 1,
             (n->n.num_children - 1 - pos) * sizeof(void*));
     n->n.num_children--;
 
-    // Remove nodes with only a single child.
     if (n->n.num_children == 1) {
         art_compress_single_child((art_node*)n, ref, n->keys[0], n->children[0]);
     }
 }
 
-art_node* art_node4_first_child(const art_node4 *n) {
+art_node* art_node2_first_child(const art_node2 *n) {
     return n->children[0];
 }
 
-art_node* art_node4_last_child(const art_node4 *n) {
+art_node* art_node2_last_child(const art_node2 *n) {
     return n->children[n->n.num_children - 1];
 }
 
-int art_node4_for_each_child(art_node4 *n, art_child_cb cb, void *data) {
+int art_node2_for_each_child(art_node2 *n, art_child_cb cb, void *data) {
     for (int i = 0; i < n->n.num_children; i++) {
         int res = cb(n->children[i], data);
         if (res) return res;
     }
     return 0;
 }
+
+#endif

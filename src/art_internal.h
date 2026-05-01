@@ -6,10 +6,16 @@
 #include <stdint.h>
 #include <string.h>
 
-#define NODE4   1
-#define NODE16  2
-#define NODE48  3
-#define NODE256 4
+#define NODE2   1
+#define NODE4   2
+#define NODE5   3
+#define NODE16  4
+#define NODE32  5
+#define NODE48  6
+#define NODE64  7
+#define NODE256 8
+
+#include "art_node_menu.h"
 
 #define MAX_PREFIX_LEN 10
 
@@ -32,6 +38,17 @@ struct art_node {
 };
 
 /*
+ * Small node with only 2 children.
+ */
+#if ART_HAS_NODE2
+typedef struct {
+    art_node n;
+    unsigned char keys[2];
+    art_node *children[2];
+} art_node2;
+#endif
+
+/*
  * Small node with only 4 children.
  */
 typedef struct {
@@ -39,6 +56,17 @@ typedef struct {
     unsigned char keys[4];
     art_node *children[4];
 } art_node4;
+
+/*
+ * Small node with only 5 children.
+ */
+#if ART_HAS_NODE5
+typedef struct {
+    art_node n;
+    unsigned char keys[5];
+    art_node *children[5];
+} art_node5;
+#endif
 
 /*
  * Node with 16 children.
@@ -50,6 +78,18 @@ typedef struct {
 } art_node16;
 
 /*
+ * Key-array node with 32 children. This is an ablation node used to test
+ * whether delaying promotion to Node48 helps at medium fanouts.
+ */
+#if ART_HAS_NODE32
+typedef struct {
+    art_node n;
+    unsigned char keys[32];
+    art_node *children[32];
+} art_node32;
+#endif
+
+/*
  * Node with 48 children, but
  * a full 256 byte field.
  */
@@ -58,6 +98,25 @@ typedef struct {
     unsigned char keys[256];
     art_node *children[48];
 } art_node48;
+
+/*
+ * Node with 64 children. The representation is selected by the menu build.
+ */
+#if ART_HAS_NODE64
+#if ART_NODE64_INDEXED
+typedef struct {
+    art_node n;
+    unsigned char keys[256];
+    art_node *children[64];
+} art_node64;
+#else
+typedef struct {
+    art_node n;
+    uint64_t bitmap[4];
+    art_node *children[64];
+} art_node64;
+#endif
+#endif
 
 /*
  * Full node with 256 children.

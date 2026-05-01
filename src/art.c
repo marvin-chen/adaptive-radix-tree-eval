@@ -69,6 +69,107 @@ void *art_leaf_value(const art_leaf *l) {
     return l->value;
 }
 
+static uint64_t record_node_type(art_stats *stats, const art_node *n) {
+    switch (n->type) {
+#if ART_HAS_NODE2
+        case NODE2:
+            stats->node2_count++;
+            stats->node2_bytes += sizeof(art_node2);
+            return sizeof(art_node2);
+#endif
+        case NODE4:
+            stats->node4_count++;
+            stats->node4_bytes += sizeof(art_node4);
+            return sizeof(art_node4);
+#if ART_HAS_NODE5
+        case NODE5:
+            stats->node5_count++;
+            stats->node5_bytes += sizeof(art_node5);
+            return sizeof(art_node5);
+#endif
+        case NODE16:
+            stats->node16_count++;
+            stats->node16_bytes += sizeof(art_node16);
+            return sizeof(art_node16);
+#if ART_HAS_NODE32
+        case NODE32:
+            stats->node32_count++;
+            stats->node32_bytes += sizeof(art_node32);
+            return sizeof(art_node32);
+#endif
+        case NODE48:
+            stats->node48_count++;
+            stats->node48_bytes += sizeof(art_node48);
+            return sizeof(art_node48);
+#if ART_HAS_NODE64
+        case NODE64:
+            stats->node64_count++;
+            stats->node64_bytes += sizeof(art_node64);
+            return sizeof(art_node64);
+#endif
+        case NODE256:
+            stats->node256_count++;
+            stats->node256_bytes += sizeof(art_node256);
+            return sizeof(art_node256);
+        default:
+            return 0;
+    }
+}
+
+static void collect_node_stats(art_node *n, art_stats *stats, uint32_t depth);
+
+struct stats_child_ctx {
+    art_stats *stats;
+    uint32_t depth;
+    uint32_t child_count;
+};
+
+static int collect_child_stats(art_node *child, void *data) {
+    struct stats_child_ctx *ctx = data;
+    ctx->child_count++;
+    collect_node_stats(child, ctx->stats, ctx->depth);
+    return 0;
+}
+
+static void collect_node_stats(art_node *n, art_stats *stats, uint32_t depth) {
+    if (!n) {
+        return;
+    }
+
+    if (IS_LEAF(n)) {
+        art_leaf *l = LEAF_RAW(n);
+        stats->leaf_count++;
+        stats->leaf_bytes += sizeof(art_leaf) + l->key_len;
+        stats->key_bytes += l->key_len;
+        stats->leaf_depth_sum += depth;
+        if (depth > stats->max_depth) {
+            stats->max_depth = depth;
+        }
+        return;
+    }
+
+    stats->internal_node_count++;
+    stats->internal_node_bytes += record_node_type(stats, n);
+
+    struct stats_child_ctx ctx = {
+        stats,
+        depth + n->partial_len + 1,
+        0
+    };
+    art_for_each_child(n, collect_child_stats, &ctx);
+    if (ctx.child_count <= 256) {
+        stats->fanout_hist[ctx.child_count]++;
+    }
+}
+
+int art_collect_stats(const art_tree *t, art_stats *stats) {
+    memset(stats, 0, sizeof(*stats));
+    stats->keys = t->size;
+    collect_node_stats(t->root, stats, 0);
+    stats->total_bytes = stats->internal_node_bytes + stats->leaf_bytes;
+    return 0;
+}
+
 /**
  * Returns the number of prefix characters shared between
  * the key and node.
@@ -130,6 +231,9 @@ static art_leaf *minimum(const art_node *n) {
     if (IS_LEAF(n)) {
         return LEAF_RAW(n);
     }
+    if (n->num_children == 0) {
+        return NULL;
+    }
     return minimum(art_first_child(n));
 }
 
@@ -141,6 +245,9 @@ static art_leaf *maximum(const art_node *n) {
     }
     if (IS_LEAF(n)) {
         return LEAF_RAW(n);
+    }
+    if (n->num_children == 0) {
+        return NULL;
     }
     return maximum(art_last_child(n));
 }
@@ -247,8 +354,8 @@ static void *recursive_insert(art_node *n, art_node **ref, const unsigned char *
             return old_val;
         }
 
-        // New value, we must split the leaf into a node4.
-        art_node *new_node = art_alloc_node(NODE4);
+        // New value, split the leaf into the menu's smallest internal node.
+        art_node *new_node = art_alloc_node(art_menu_min_type());
 
         // Create a new leaf.
         art_leaf *l2 = make_leaf(key, key_len, value);
@@ -258,7 +365,7 @@ static void *recursive_insert(art_node *n, art_node **ref, const unsigned char *
         new_node->partial_len = longest_prefix;
         memcpy(new_node->partial, key + depth, art_min_int(MAX_PREFIX_LEN, longest_prefix));
 
-        // Add the leafs to the new node4.
+        // Add the leafs to the new node.
         *ref = new_node;
 
         art_add_child(new_node, ref, l->key[depth + longest_prefix], SET_LEAF(l));
@@ -276,7 +383,7 @@ static void *recursive_insert(art_node *n, art_node **ref, const unsigned char *
         }
 
         // Create a new node.
-        art_node *new_node = art_alloc_node(NODE4);
+        art_node *new_node = art_alloc_node(art_menu_min_type());
         *ref = new_node;
         new_node->partial_len = prefix_diff;
         memcpy(new_node->partial, n->partial, art_min_int(MAX_PREFIX_LEN, prefix_diff));

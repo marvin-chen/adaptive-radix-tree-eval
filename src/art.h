@@ -31,6 +31,43 @@ typedef struct {
     uint64_t size;
 } art_tree;
 
+/*
+ * Structural statistics for explaining node-menu benchmark results.
+ */
+typedef struct {
+    uint64_t keys;
+    uint64_t leaf_count;
+    uint64_t internal_node_count;
+
+    uint64_t node4_count;
+    uint64_t node16_count;
+    uint64_t node32_count;
+    uint64_t node48_count;
+    uint64_t node256_count;
+
+    uint64_t node4_bytes;
+    uint64_t node16_bytes;
+    uint64_t node32_bytes;
+    uint64_t node48_bytes;
+    uint64_t node256_bytes;
+
+    uint64_t internal_node_bytes;
+    uint64_t leaf_bytes;
+    uint64_t key_bytes;
+    uint64_t total_bytes;
+
+    uint64_t fanout_hist[257];
+    uint64_t leaf_depth_sum;
+    uint32_t max_depth;
+
+    uint64_t node64_count;
+    uint64_t node64_bytes;
+    uint64_t node2_count;
+    uint64_t node5_count;
+    uint64_t node2_bytes;
+    uint64_t node5_bytes;
+} art_stats;
+
 /**
  * Initializes an ART tree
  * @return 0 on success.
@@ -136,6 +173,14 @@ uint32_t art_leaf_key_len(const art_leaf *l);
  * Returns the opaque value stored in a leaf.
  */
 void* art_leaf_value(const art_leaf *l);
+
+/**
+ * Collects structural statistics for a tree.
+ * @arg t The tree
+ * @arg stats Output statistics, zeroed and filled by this function
+ * @return 0 on success.
+ */
+int art_collect_stats(const art_tree *t, art_stats *stats);
 
 /**
  * Iterates through the entries pairs in the map,

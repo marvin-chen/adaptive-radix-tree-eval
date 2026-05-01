@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,10 @@
 #define ART_PROJECT_SOURCE_DIR "."
 #endif
 
+#ifndef ART_BENCH_VARIANT
+#define ART_BENCH_VARIANT "original4"
+#endif
+
 typedef struct {
     unsigned char *data;
     int len;
@@ -30,13 +35,17 @@ typedef enum {
     WORKLOAD_DENSE_UINT64,
     WORKLOAD_SPARSE_UINT64,
     WORKLOAD_WORDS_FIXTURE,
-    WORKLOAD_UUID_FIXTURE
+    WORKLOAD_UUID_FIXTURE,
+    WORKLOAD_CONTROLLED_FANOUT
 } workload_kind;
 
 typedef struct {
     workload_kind workload;
     uint64_t n;
     uint64_t seed;
+    uint64_t groups;
+    uint64_t fanout;
+    double zipf_s;
     int runs;
     const char *out_path;
 } bench_config;
@@ -188,8 +197,47 @@ static int make_fixture_absent_keys(key_record **out, uint64_t n) {
     return 0;
 }
 
+static int controlled_fanout_count(uint64_t groups, uint64_t fanout, uint64_t *out_n) {
+    if (groups == 0 || fanout == 0 || fanout > 255) return -1;
+    if (groups > (uint64_t)UINT32_MAX + UINT64_C(1)) return -1;
+    if (groups > UINT64_MAX / fanout) return -1;
+    *out_n = groups * fanout;
+    return 0;
+}
+
+static int make_controlled_fanout_keys(key_record **out, uint64_t groups,
+                                       uint64_t fanout, int absent) {
+    uint64_t n = 0;
+    if (controlled_fanout_count(groups, fanout, &n) != 0) return -1;
+
+    key_record *keys = (key_record*)calloc((size_t)n, sizeof(*keys));
+    if (!keys) return -1;
+
+    uint64_t idx = 0;
+    for (uint64_t group = 0; group < groups; ++group) {
+        for (uint64_t child = 0; child < fanout; ++child) {
+            unsigned char key[6];
+            key[0] = (unsigned char)((group >> 24) & 0xffu);
+            key[1] = (unsigned char)((group >> 16) & 0xffu);
+            key[2] = (unsigned char)((group >> 8) & 0xffu);
+            key[3] = (unsigned char)(group & 0xffu);
+            key[4] = (unsigned char)child;
+            key[5] = absent ? 1u : 0u;
+            if (copy_key(&keys[idx], key, sizeof(key)) != 0) {
+                free_keys(keys, idx);
+                return -1;
+            }
+            idx++;
+        }
+    }
+
+    *out = keys;
+    return 0;
+}
+
 static int load_workload(workload_kind workload, uint64_t requested_n, uint64_t seed,
-                         key_record **keys, key_record **absent, uint64_t *actual_n) {
+                         uint64_t groups, uint64_t fanout, key_record **keys,
+                         key_record **absent, uint64_t *actual_n) {
     switch (workload) {
         case WORKLOAD_DENSE_UINT64:
             *actual_n = requested_n;
@@ -205,6 +253,10 @@ static int load_workload(workload_kind workload, uint64_t requested_n, uint64_t 
         case WORKLOAD_UUID_FIXTURE:
             if (load_fixture_keys("tests/uuid.txt", requested_n, keys, actual_n) != 0) return -1;
             return make_fixture_absent_keys(absent, *actual_n);
+        case WORKLOAD_CONTROLLED_FANOUT:
+            if (controlled_fanout_count(groups, fanout, actual_n) != 0) return -1;
+            return make_controlled_fanout_keys(keys, groups, fanout, 0) ||
+                   make_controlled_fanout_keys(absent, groups, fanout, 1);
         default:
             return -1;
     }
@@ -216,6 +268,7 @@ static const char *workload_name(workload_kind workload) {
         case WORKLOAD_SPARSE_UINT64: return "sparse_uint64";
         case WORKLOAD_WORDS_FIXTURE: return "words_fixture";
         case WORKLOAD_UUID_FIXTURE: return "uuid_fixture";
+        case WORKLOAD_CONTROLLED_FANOUT: return "controlled_fanout";
         default: return "unknown";
     }
 }
@@ -225,6 +278,7 @@ static int parse_workload(const char *value, workload_kind *out) {
     else if (strcmp(value, "sparse_uint64") == 0) *out = WORKLOAD_SPARSE_UINT64;
     else if (strcmp(value, "words_fixture") == 0) *out = WORKLOAD_WORDS_FIXTURE;
     else if (strcmp(value, "uuid_fixture") == 0) *out = WORKLOAD_UUID_FIXTURE;
+    else if (strcmp(value, "controlled_fanout") == 0) *out = WORKLOAD_CONTROLLED_FANOUT;
     else return -1;
     return 0;
 }
@@ -241,6 +295,52 @@ static void shuffle_order(uint64_t *order, uint64_t n, uint64_t seed) {
     }
 }
 
+static double random_unit(uint64_t *state) {
+    return (double)(splitmix64(state) >> 11) / 9007199254740992.0;
+}
+
+static uint64_t lower_bound_double(const double *values, uint64_t n, double needle) {
+    uint64_t lo = 0;
+    uint64_t hi = n;
+    while (lo < hi) {
+        uint64_t mid = lo + (hi - lo) / 2;
+        if (values[mid] < needle) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo == n ? n - 1 : lo;
+}
+
+static int make_zipf_lookup_order(uint64_t *order, uint64_t n, uint64_t seed, double s) {
+    uint64_t *rank_to_index = (uint64_t*)malloc((size_t)n * sizeof(*rank_to_index));
+    double *cdf = (double*)malloc((size_t)n * sizeof(*cdf));
+    if (!rank_to_index || !cdf) {
+        free(rank_to_index);
+        free(cdf);
+        return -1;
+    }
+
+    shuffle_order(rank_to_index, n, seed ^ UINT64_C(0xa0761d6478bd642f));
+
+    double total = 0.0;
+    for (uint64_t i = 0; i < n; ++i) {
+        total += 1.0 / pow((double)i + 1.0, s);
+        cdf[i] = total;
+    }
+    for (uint64_t i = 0; i < n; ++i) {
+        cdf[i] /= total;
+    }
+
+    uint64_t state = seed ^ UINT64_C(0xe7037ed1a0b428db);
+    for (uint64_t i = 0; i < n; ++i) {
+        uint64_t rank = lower_bound_double(cdf, n, random_unit(&state));
+        order[i] = rank_to_index[rank];
+    }
+
+    free(rank_to_index);
+    free(cdf);
+    return 0;
+}
+
 static int output_needs_header(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return 1;
@@ -249,13 +349,54 @@ static int output_needs_header(const char *path) {
     return ch == EOF;
 }
 
+static uint64_t fanout_range_sum(const art_stats *stats, int first, int last) {
+    uint64_t total = 0;
+    for (int i = first; i <= last; ++i) {
+        total += stats->fanout_hist[i];
+    }
+    return total;
+}
+
 static int write_row(FILE *out, const bench_config *cfg, uint64_t actual_n, int run,
-                     const char *operation, double seconds, uint64_t ops) {
+                     const char *operation, double seconds, uint64_t ops,
+                     const art_stats *stats) {
     double mops = seconds > 0.0 ? ((double)ops / seconds) / 1000000.0 : 0.0;
+    double bytes_per_key = stats->keys
+        ? (double)stats->total_bytes / (double)stats->keys
+        : 0.0;
+    double avg_leaf_depth = stats->leaf_count
+        ? (double)stats->leaf_depth_sum / (double)stats->leaf_count
+        : 0.0;
+    double row_zipf_s = strcmp(operation, "lookup_success") == 0 ? cfg->zipf_s : 0.0;
+
     return fprintf(out,
-                   "original4,%s,%" PRIu64 ",%" PRIu64 ",%d,%s,%.9f,%" PRIu64 ",%.6f,%" PRIu64 "\n",
-                   workload_name(cfg->workload), actual_n, cfg->seed, run,
-                   operation, seconds, ops, mops, actual_n) < 0 ? -1 : 0;
+                   "%s,%s,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%.6g,%d,%s,%.9f,%" PRIu64 ",%.6f,%" PRIu64
+                   ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
+                   ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
+                   ",%.3f,%.3f,%" PRIu32
+                   ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
+                   ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
+                   ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "\n",
+                   ART_BENCH_VARIANT, workload_name(cfg->workload), actual_n, cfg->seed,
+                   cfg->fanout, cfg->groups, row_zipf_s, run,
+                   operation, seconds, ops, mops, actual_n,
+                   stats->node4_count, stats->node16_count, stats->node32_count,
+                   stats->node48_count, stats->node256_count, stats->internal_node_count,
+                   stats->leaf_count, stats->internal_node_bytes, stats->leaf_bytes,
+                   stats->total_bytes, bytes_per_key, avg_leaf_depth, stats->max_depth,
+                   fanout_range_sum(stats, 0, 4),
+                   fanout_range_sum(stats, 5, 16),
+                   fanout_range_sum(stats, 17, 32),
+                   fanout_range_sum(stats, 33, 48),
+                   fanout_range_sum(stats, 49, 64),
+                   fanout_range_sum(stats, 65, 256),
+                   stats->node64_count, stats->node4_bytes, stats->node16_bytes,
+                   stats->node32_bytes, stats->node48_bytes, stats->node64_bytes,
+                   stats->node256_bytes, stats->node2_count, stats->node5_count,
+                   stats->node2_bytes, stats->node5_bytes,
+                   fanout_range_sum(stats, 1, 2),
+                   fanout_range_sum(stats, 3, 5),
+                   fanout_range_sum(stats, 6, 16)) < 0 ? -1 : 0;
 }
 
 static int run_one(const bench_config *cfg, FILE *out, key_record *keys, key_record *absent,
@@ -272,7 +413,19 @@ static int run_one(const bench_config *cfg, FILE *out, key_record *keys, key_rec
 
     for (uint64_t i = 0; i < actual_n; ++i) values[i] = i + 1;
     shuffle_order(insert_order, actual_n, cfg->seed + (uint64_t)run * UINT64_C(1315423911));
-    shuffle_order(lookup_order, actual_n, cfg->seed ^ ((uint64_t)run * UINT64_C(11400714819323198485)));
+    if (cfg->zipf_s > 0.0) {
+        if (make_zipf_lookup_order(lookup_order, actual_n,
+                cfg->seed ^ ((uint64_t)run * UINT64_C(11400714819323198485)),
+                cfg->zipf_s) != 0) {
+            free(values);
+            free(insert_order);
+            free(lookup_order);
+            return -1;
+        }
+    } else {
+        shuffle_order(lookup_order, actual_n,
+                cfg->seed ^ ((uint64_t)run * UINT64_C(11400714819323198485)));
+    }
 
     art_tree tree;
     art_tree_init(&tree);
@@ -284,7 +437,10 @@ static int run_one(const bench_config *cfg, FILE *out, key_record *keys, key_rec
         art_insert(&tree, keys[idx].data, keys[idx].len, &values[idx]);
     }
     double seconds = now_seconds() - start;
-    if (write_row(out, cfg, actual_n, run, "insert", seconds, actual_n) != 0) goto cleanup;
+
+    art_stats stats;
+    if (art_collect_stats(&tree, &stats) != 0) goto cleanup;
+    if (write_row(out, cfg, actual_n, run, "insert", seconds, actual_n, &stats) != 0) goto cleanup;
 
     uintptr_t checksum = 0;
     start = now_seconds();
@@ -299,7 +455,7 @@ static int run_one(const bench_config *cfg, FILE *out, key_record *keys, key_rec
     }
     seconds = now_seconds() - start;
     bench_sink ^= checksum;
-    if (write_row(out, cfg, actual_n, run, "lookup_success", seconds, actual_n) != 0) goto cleanup;
+    if (write_row(out, cfg, actual_n, run, "lookup_success", seconds, actual_n, &stats) != 0) goto cleanup;
 
     checksum = 0;
     start = now_seconds();
@@ -313,7 +469,7 @@ static int run_one(const bench_config *cfg, FILE *out, key_record *keys, key_rec
     }
     seconds = now_seconds() - start;
     bench_sink ^= checksum;
-    if (write_row(out, cfg, actual_n, run, "lookup_absent", seconds, actual_n) != 0) goto cleanup;
+    if (write_row(out, cfg, actual_n, run, "lookup_absent", seconds, actual_n, &stats) != 0) goto cleanup;
 
     rc = 0;
 
@@ -327,8 +483,9 @@ cleanup:
 
 static void usage(const char *argv0) {
     fprintf(stderr,
-            "usage: %s --workload dense_uint64|sparse_uint64|words_fixture|uuid_fixture "
-            "--n <count> --seed <uint64> --runs <count> --out <csv path>\n",
+            "usage: %s --workload dense_uint64|sparse_uint64|words_fixture|uuid_fixture|controlled_fanout "
+            "--seed <uint64> --runs <count> --out <csv path> [--zipf <s>] "
+            "[--n <count> | --groups <count> --fanout <count>]\n",
             argv0);
 }
 
@@ -338,6 +495,15 @@ static int parse_u64(const char *text, uint64_t *out) {
     unsigned long long value = strtoull(text, &end, 10);
     if (errno || !end || *end) return -1;
     *out = (uint64_t)value;
+    return 0;
+}
+
+static int parse_double(const char *text, double *out) {
+    char *end = NULL;
+    errno = 0;
+    double value = strtod(text, &end);
+    if (errno || !end || *end) return -1;
+    *out = value;
     return 0;
 }
 
@@ -353,6 +519,12 @@ static int parse_args(int argc, char **argv, bench_config *cfg) {
             if (parse_u64(argv[++i], &cfg->n) != 0) return -1;
         } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
             if (parse_u64(argv[++i], &cfg->seed) != 0) return -1;
+        } else if (strcmp(argv[i], "--groups") == 0 && i + 1 < argc) {
+            if (parse_u64(argv[++i], &cfg->groups) != 0) return -1;
+        } else if (strcmp(argv[i], "--fanout") == 0 && i + 1 < argc) {
+            if (parse_u64(argv[++i], &cfg->fanout) != 0) return -1;
+        } else if (strcmp(argv[i], "--zipf") == 0 && i + 1 < argc) {
+            if (parse_double(argv[++i], &cfg->zipf_s) != 0 || cfg->zipf_s < 0.0) return -1;
         } else if (strcmp(argv[i], "--runs") == 0 && i + 1 < argc) {
             uint64_t runs = 0;
             if (parse_u64(argv[++i], &runs) != 0 || runs == 0 || runs > 1000000) return -1;
@@ -362,6 +534,12 @@ static int parse_args(int argc, char **argv, bench_config *cfg) {
         } else {
             return -1;
         }
+    }
+
+    if (cfg->workload == WORKLOAD_CONTROLLED_FANOUT) {
+        uint64_t actual_n = 0;
+        return cfg->out_path != NULL &&
+               controlled_fanout_count(cfg->groups, cfg->fanout, &actual_n) == 0 ? 0 : -1;
     }
 
     return cfg->n > 0 && cfg->out_path != NULL ? 0 : -1;
@@ -377,7 +555,8 @@ int main(int argc, char **argv) {
     key_record *keys = NULL;
     key_record *absent = NULL;
     uint64_t actual_n = 0;
-    if (load_workload(cfg.workload, cfg.n, cfg.seed, &keys, &absent, &actual_n) != 0) {
+    if (load_workload(cfg.workload, cfg.n, cfg.seed, cfg.groups, cfg.fanout,
+            &keys, &absent, &actual_n) != 0) {
         fprintf(stderr, "failed to load workload %s\n", workload_name(cfg.workload));
         free_keys(keys, actual_n);
         free_keys(absent, actual_n);
@@ -393,7 +572,15 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (needs_header) {
-        fprintf(out, "variant,workload,n,seed,run,operation,seconds,ops,mops_per_sec,keys\n");
+        fprintf(out,
+                "variant,workload,n,seed,fanout_target,groups,zipf_s,run,operation,seconds,ops,mops_per_sec,keys,"
+                "node4,node16,node32,node48,node256,internal_nodes,leaves,"
+                "internal_node_bytes,leaf_bytes,total_bytes,bytes_per_key,"
+                "avg_leaf_depth,max_leaf_depth,fanout_0_4,fanout_5_16,"
+                "fanout_17_32,fanout_33_48,fanout_49_64,fanout_65_256,"
+                "node64,node4_bytes,node16_bytes,node32_bytes,node48_bytes,"
+                "node64_bytes,node256_bytes,node2,node5,node2_bytes,node5_bytes,"
+                "fanout_1_2,fanout_3_5,fanout_6_16\n");
     }
 
     int rc = 0;
