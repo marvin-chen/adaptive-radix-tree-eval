@@ -38,3 +38,4 @@ scripts_internal/
 # Misc
 build-msys/
 _omit/
+*.tgz
