@@ -38,10 +38,31 @@ art_node** art_node32_find_child(art_node32 *n, unsigned char c) {
 void art_node32_add_child(art_node32 *n, unsigned char c, void *child) {
     if (n->n.num_children >= 32) abort();
 
-    int idx;
-    for (idx = 0; idx < n->n.num_children; idx++) {
-        if (c < n->keys[idx]) break;
+    uint32_t bitfield;
+#if ART_HAS_SSE2
+    uint32_t mask = n->n.num_children == 32
+        ? UINT32_MAX
+        : (((uint32_t)1 << n->n.num_children) - 1u);
+    const __m128i bias = _mm_set1_epi8((char)0x80);
+    __m128i key = _mm_xor_si128(_mm_set1_epi8((char)c), bias);
+    __m128i keys = _mm_xor_si128(_mm_loadu_si128((__m128i*)n->keys), bias);
+    __m128i cmp = _mm_cmplt_epi8(key, keys);
+    bitfield = (uint32_t)_mm_movemask_epi8(cmp);
+
+    if (n->n.num_children > 16) {
+        keys = _mm_xor_si128(_mm_loadu_si128((__m128i*)(n->keys + 16)), bias);
+        cmp = _mm_cmplt_epi8(key, keys);
+        bitfield |= (uint32_t)_mm_movemask_epi8(cmp) << 16;
     }
+    bitfield &= mask;
+#else
+    bitfield = 0;
+    for (int i = 0; i < n->n.num_children; i++) {
+        if (c < n->keys[i]) bitfield |= (uint32_t)1 << i;
+    }
+#endif
+
+    uint32_t idx = bitfield ? (uint32_t)__builtin_ctz(bitfield) : n->n.num_children;
 
     // Shift to make room.
     memmove(n->keys + idx + 1, n->keys + idx, n->n.num_children - idx);

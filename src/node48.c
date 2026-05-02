@@ -10,8 +10,11 @@ art_node** art_node48_find_child(art_node48 *n, unsigned char c) {
 void art_node48_add_child(art_node48 *n, unsigned char c, void *child) {
     if (n->n.num_children >= 48) abort();
 
-    int pos = 0;
-    while (n->children[pos]) pos++;
+    int pos = n->n.num_children;
+    if (pos >= 48 || n->children[pos]) {
+        pos = 0;
+        while (n->children[pos]) pos++;
+    }
     n->children[pos] = (art_node*)child;
     n->keys[c] = pos + 1;
     n->n.num_children++;

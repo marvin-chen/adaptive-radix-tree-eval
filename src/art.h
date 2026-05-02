@@ -111,6 +111,7 @@ inline uint64_t art_size(art_tree *t) {
  * @arg key the key
  * @arg key_len the length of the key
  * @arg value opaque value.
+ * Keys must be prefix-free; include a terminator byte for variable-length strings.
  * @return null if the item was newly inserted, otherwise
  * the old value pointer is returned.
  */
@@ -122,6 +123,7 @@ void* art_insert(art_tree *t, const unsigned char *key, int key_len, void *value
  * @arg key the key
  * @arg key_len the length of the key
  * @arg value opaque value.
+ * Keys must be prefix-free; include a terminator byte for variable-length strings.
  * @return null if the item was newly inserted, otherwise
  * the old value pointer is returned.
  */

@@ -63,6 +63,15 @@ typedef struct {
     uintptr_t checksum;
 } scan_ctx;
 
+typedef struct {
+    unsigned char *previous;
+    uint32_t previous_len;
+    uint64_t visited;
+    const unsigned char *prefix;
+    int prefix_len;
+    int have_previous;
+} order_check_ctx;
+
 static volatile uintptr_t bench_sink;
 
 static double now_seconds(void) {
@@ -302,6 +311,91 @@ static int scan_callback(void *data, const unsigned char *key,
 }
 
 static int sample_prefix(key_record *dst, const key_record *keys, uint64_t key_count,
+                         int prefix_len, uint64_t *state);
+
+static int compare_keys(const unsigned char *a, uint32_t a_len,
+                        const unsigned char *b, uint32_t b_len) {
+    uint32_t min_len = a_len < b_len ? a_len : b_len;
+    int cmp = min_len ? memcmp(a, b, min_len) : 0;
+    if (cmp) return cmp;
+    if (a_len < b_len) return -1;
+    if (a_len > b_len) return 1;
+    return 0;
+}
+
+static int has_prefix(const unsigned char *key, uint32_t key_len,
+                      const unsigned char *prefix, int prefix_len) {
+    return prefix_len <= (int)key_len &&
+           memcmp(key, prefix, (size_t)prefix_len) == 0;
+}
+
+static int order_check_callback(void *data, const unsigned char *key,
+                                uint32_t key_len, void *value) {
+    order_check_ctx *ctx = (order_check_ctx*)data;
+    (void)value;
+
+    if (ctx->prefix_len > 0 && !has_prefix(key, key_len, ctx->prefix, ctx->prefix_len)) {
+        fprintf(stderr, "prefix iteration returned a key outside the requested prefix\n");
+        return -1;
+    }
+
+    if (ctx->have_previous &&
+            compare_keys(ctx->previous, ctx->previous_len, key, key_len) > 0) {
+        fprintf(stderr, "iteration returned keys out of lexicographic order\n");
+        return -1;
+    }
+
+    unsigned char *copy = NULL;
+    if (key_len > 0) {
+        copy = (unsigned char*)malloc(key_len);
+        if (!copy) return -1;
+        memcpy(copy, key, key_len);
+    }
+    free(ctx->previous);
+    ctx->previous = copy;
+    ctx->previous_len = key_len;
+    ctx->have_previous = 1;
+    ctx->visited++;
+    return 0;
+}
+
+static int validate_full_iteration(art_tree *tree, uint64_t expected) {
+    order_check_ctx ctx = {0};
+    int rc = art_iter(tree, order_check_callback, &ctx);
+    if (rc == 0 && ctx.visited != expected) {
+        fprintf(stderr, "full iteration validation visited %" PRIu64 ", expected %" PRIu64 "\n",
+                ctx.visited, expected);
+        rc = -1;
+    }
+    free(ctx.previous);
+    return rc;
+}
+
+static int validate_prefix_scans(const bench_config *cfg, art_tree *tree,
+                                 const key_record *keys, uint64_t actual_n, int run) {
+    uint64_t state = cfg->seed ^ ((uint64_t)run * UINT64_C(11400714819323198485));
+    for (uint64_t i = 0; i < cfg->prefix_samples; ++i) {
+        key_record prefix = {0, 0};
+        order_check_ctx ctx = {0};
+        if (sample_prefix(&prefix, keys, actual_n, cfg->prefix_len, &state) != 0) {
+            return -1;
+        }
+
+        ctx.prefix = prefix.data;
+        ctx.prefix_len = prefix.len;
+        int rc = art_iter_prefix(tree, prefix.data, prefix.len, order_check_callback, &ctx);
+        if (rc == 0 && ctx.visited == 0) {
+            fprintf(stderr, "prefix scan validation visited no entries at sample %" PRIu64 "\n", i);
+            rc = -1;
+        }
+        free(ctx.previous);
+        free(prefix.data);
+        if (rc != 0) return -1;
+    }
+    return 0;
+}
+
+static int sample_prefix(key_record *dst, const key_record *keys, uint64_t key_count,
                          int prefix_len, uint64_t *state) {
     uint64_t start = splitmix64(state) % key_count;
     for (uint64_t offset = 0; offset < key_count; ++offset) {
@@ -359,25 +453,12 @@ static int run_one(const bench_config *cfg, FILE *out, key_record *keys,
         art_insert(&tree, keys[idx].data, keys[idx].len, &values[idx]);
     }
 
-    art_stats stats;
-    if (art_collect_stats(&tree, &stats) != 0) goto cleanup;
-
-    if (cfg->mode == SCAN_MODE_BOTH || cfg->mode == SCAN_MODE_FULL) {
-        scan_ctx ctx = {0, 0};
-        double start = now_seconds();
-        for (uint64_t pass = 0; pass < cfg->scan_passes; ++pass) {
-            if (art_iter(&tree, scan_callback, &ctx) != 0) goto cleanup;
-        }
-        double seconds = now_seconds() - start;
-        if (ctx.visited != actual_n * cfg->scan_passes) {
-            fprintf(stderr, "full iteration visited %" PRIu64 ", expected %" PRIu64 "\n",
-                    ctx.visited, actual_n * cfg->scan_passes);
-            goto cleanup;
-        }
-        bench_sink ^= ctx.checksum;
-        if (write_row(out, cfg, actual_n, run, "iter_full", 0, cfg->scan_passes,
-                seconds, ctx.visited, &stats) != 0) goto cleanup;
-    }
+    int have_full = 0;
+    int have_prefix = 0;
+    double full_seconds = 0.0;
+    double prefix_seconds = 0.0;
+    uint64_t full_visited = 0;
+    uint64_t prefix_visited = 0;
 
     if (cfg->mode == SCAN_MODE_BOTH || cfg->mode == SCAN_MODE_PREFIX) {
         scan_ctx ctx = {0, 0};
@@ -395,13 +476,45 @@ static int run_one(const bench_config *cfg, FILE *out, key_record *keys,
                 goto cleanup;
             }
         }
-        double seconds = now_seconds() - start;
+        prefix_seconds = now_seconds() - start;
+        prefix_visited = ctx.visited;
+        have_prefix = 1;
         bench_sink ^= ctx.checksum;
-        rc = write_row(out, cfg, actual_n, run, "iter_prefix", cfg->prefix_len,
-            cfg->prefix_samples, seconds, ctx.visited, &stats);
-    } else {
-        rc = 0;
     }
+
+    if (cfg->mode == SCAN_MODE_BOTH || cfg->mode == SCAN_MODE_FULL) {
+        scan_ctx ctx = {0, 0};
+        double start = now_seconds();
+        for (uint64_t pass = 0; pass < cfg->scan_passes; ++pass) {
+            if (art_iter(&tree, scan_callback, &ctx) != 0) goto cleanup;
+        }
+        full_seconds = now_seconds() - start;
+        if (ctx.visited != actual_n * cfg->scan_passes) {
+            fprintf(stderr, "full iteration visited %" PRIu64 ", expected %" PRIu64 "\n",
+                    ctx.visited, actual_n * cfg->scan_passes);
+            goto cleanup;
+        }
+        full_visited = ctx.visited;
+        have_full = 1;
+        bench_sink ^= ctx.checksum;
+    }
+
+    if (have_prefix && validate_prefix_scans(cfg, &tree, keys, actual_n, run) != 0) {
+        goto cleanup;
+    }
+    if (have_full && validate_full_iteration(&tree, actual_n) != 0) {
+        goto cleanup;
+    }
+
+    art_stats stats;
+    if (art_collect_stats(&tree, &stats) != 0) goto cleanup;
+
+    if (have_full && write_row(out, cfg, actual_n, run, "iter_full", 0, cfg->scan_passes,
+            full_seconds, full_visited, &stats) != 0) goto cleanup;
+    if (have_prefix && write_row(out, cfg, actual_n, run, "iter_prefix", cfg->prefix_len,
+            cfg->prefix_samples, prefix_seconds, prefix_visited, &stats) != 0) goto cleanup;
+
+    rc = 0;
 
 cleanup:
     art_tree_destroy(&tree);

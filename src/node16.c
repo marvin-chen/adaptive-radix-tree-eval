@@ -44,7 +44,10 @@ void art_node16_add_child(art_node16 *n, unsigned char c, void *child) {
     // support non-x86 architectures.
 #if ART_HAS_SSE2
     // Compare the key to all 16 stored keys.
-    __m128i cmp = _mm_cmplt_epi8(_mm_set1_epi8(c), _mm_loadu_si128((__m128i*)n->keys));
+    const __m128i bias = _mm_set1_epi8((char)0x80);
+    __m128i key = _mm_xor_si128(_mm_set1_epi8((char)c), bias);
+    __m128i keys = _mm_xor_si128(_mm_loadu_si128((__m128i*)n->keys), bias);
+    __m128i cmp = _mm_cmplt_epi8(key, keys);
     bitfield = _mm_movemask_epi8(cmp) & mask;
 #else
     // Compare the key to all 16 stored keys.

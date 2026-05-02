@@ -12,8 +12,11 @@ art_node** art_node64_find_child(art_node64 *n, unsigned char c) {
 void art_node64_add_child(art_node64 *n, unsigned char c, void *child) {
     if (n->n.num_children >= 64) abort();
 
-    int pos = 0;
-    while (n->children[pos]) pos++;
+    int pos = n->n.num_children;
+    if (pos >= 64 || n->children[pos]) {
+        pos = 0;
+        while (n->children[pos]) pos++;
+    }
     n->children[pos] = (art_node*)child;
     n->keys[c] = pos + 1;
     n->n.num_children++;

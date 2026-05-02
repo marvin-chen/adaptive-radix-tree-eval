@@ -288,7 +288,8 @@ endif()
 
 target_compile_definitions(bench_original
     PRIVATE
-        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
+        ART_PROJECT_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"
+        ART_BENCH_VARIANT=\"original4\")
 
 add_executable(bench_node32
     bench/bench_original.c)

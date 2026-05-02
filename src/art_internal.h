@@ -17,7 +17,7 @@
 
 #include "art_node_menu.h"
 
-#define MAX_PREFIX_LEN 10
+#define MAX_PREFIX_LEN 8
 
 /*
  * Macros to manipulate pointer tags.
@@ -32,8 +32,9 @@
  */
 struct art_node {
     uint32_t partial_len;
+    uint16_t num_children;
     uint8_t type;
-    uint8_t num_children;
+    uint8_t reserved;
     unsigned char partial[MAX_PREFIX_LEN];
 };
 

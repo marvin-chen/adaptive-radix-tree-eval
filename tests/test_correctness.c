@@ -1,5 +1,9 @@
 #include "art.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <assert.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -23,6 +27,23 @@ static void encode_u64_be(uint64_t value, unsigned char out[8]) {
         out[i] = (unsigned char)(value & 0xffu);
         value >>= 8;
     }
+}
+
+struct order_ctx {
+    const unsigned char *expected;
+    int count;
+    int seen;
+};
+
+static int check_unsigned_order(void *data, const unsigned char *key,
+                                uint32_t key_len, void *value) {
+    struct order_ctx *ctx = (struct order_ctx*)data;
+    (void)value;
+    assert(ctx->seen < ctx->count);
+    assert(key_len == 2);
+    assert(key[0] == ctx->expected[ctx->seen]);
+    ctx->seen++;
+    return 0;
 }
 
 static void test_dense_uint64(void) {
@@ -97,6 +118,90 @@ static void test_overwrite(void) {
     assert(art_insert(&t, key, 8, &second) == &first);
     assert(art_size(&t) == 1);
     assert(art_search(&t, key, 8) == &second);
+    assert(art_tree_destroy(&t) == 0);
+}
+
+static void test_unsigned_iteration_order(void) {
+    enum { N = 6 };
+    unsigned char bytes[] = { 1, 127, 128, 129, 254, 255 };
+    art_tree t;
+    uintptr_t values[N];
+    struct order_ctx ctx = { bytes, N, 0 };
+
+    assert(art_tree_init(&t) == 0);
+    for (int i = 0; i < N; ++i) {
+        unsigned char key[2] = { bytes[i], 0 };
+        values[i] = (uintptr_t)(i + 1);
+        assert(art_insert(&t, key, sizeof(key), &values[i]) == NULL);
+    }
+
+    art_leaf *min_leaf = art_minimum(&t);
+    art_leaf *max_leaf = art_maximum(&t);
+    assert(min_leaf != NULL);
+    assert(max_leaf != NULL);
+    assert(art_leaf_key(min_leaf)[0] == 1);
+    assert(art_leaf_key(max_leaf)[0] == 255);
+    assert(art_iter(&t, check_unsigned_order, &ctx) == 0);
+    assert(ctx.seen == N);
+    assert(art_tree_destroy(&t) == 0);
+}
+
+static void test_short_query_does_not_read_past_key(void) {
+    art_tree t;
+    uintptr_t first = 1;
+    uintptr_t second = 2;
+    unsigned char key1[3] = { 1, 1, 0 };
+    unsigned char key2[3] = { 1, 2, 0 };
+    unsigned char short_key[1] = { 1 };
+
+    assert(art_tree_init(&t) == 0);
+    assert(art_insert(&t, key1, sizeof(key1), &first) == NULL);
+    assert(art_insert(&t, key2, sizeof(key2), &second) == NULL);
+    assert(art_search(&t, short_key, sizeof(short_key)) == NULL);
+    assert(art_delete(&t, short_key, sizeof(short_key)) == NULL);
+    assert(art_search(&t, key1, sizeof(key1)) == &first);
+    assert(art_search(&t, key2, sizeof(key2)) == &second);
+    assert(art_tree_destroy(&t) == 0);
+}
+
+static void test_full_node256_fanout(void) {
+    enum { N = 256 };
+    art_tree t;
+    uintptr_t values[N];
+    assert(art_tree_init(&t) == 0);
+
+    for (int i = 0; i < N; ++i) {
+        unsigned char key[3] = { 0xfe, (unsigned char)i, 0x7e };
+        values[i] = (uintptr_t)(i + 1);
+        assert(art_insert(&t, key, sizeof(key), &values[i]) == NULL);
+    }
+
+    art_stats stats;
+    assert(art_collect_stats(&t, &stats) == 0);
+    assert(stats.fanout_hist[256] == 1);
+    assert(stats.node256_count > 0);
+
+    art_leaf *min_leaf = art_minimum(&t);
+    art_leaf *max_leaf = art_maximum(&t);
+    assert(min_leaf != NULL);
+    assert(max_leaf != NULL);
+    assert(art_leaf_key(min_leaf)[1] == 0);
+    assert(art_leaf_key(max_leaf)[1] == 255);
+
+    unsigned char max_key[3] = { 0xfe, 255, 0x7e };
+    assert(art_delete(&t, max_key, sizeof(max_key)) == &values[255]);
+    assert(art_search(&t, max_key, sizeof(max_key)) == NULL);
+
+    for (int i = 0; i < N - 1; ++i) {
+        unsigned char key[3] = { 0xfe, (unsigned char)i, 0x7e };
+        assert(art_search(&t, key, sizeof(key)) == &values[i]);
+    }
+
+    assert(art_collect_stats(&t, &stats) == 0);
+    assert(stats.fanout_hist[255] == 1);
+    max_leaf = art_maximum(&t);
+    assert(max_leaf != NULL);
+    assert(art_leaf_key(max_leaf)[1] == 254);
     assert(art_tree_destroy(&t) == 0);
 }
 
@@ -504,6 +609,9 @@ int main(void) {
     test_dense_uint64();
     test_sparse_uint64();
     test_overwrite();
+    test_unsigned_iteration_order();
+    test_short_query_does_not_read_past_key();
+    test_full_node256_fanout();
     test_medium_fanout_growth_and_shrink();
     test_node32_target_fanout();
     test_paper6_small_nodes();

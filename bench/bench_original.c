@@ -45,6 +45,7 @@ typedef struct {
     uint64_t seed;
     uint64_t groups;
     uint64_t fanout;
+    uint64_t duplicate_keys;
     double zipf_s;
     int runs;
     const char *out_path;
@@ -87,6 +88,60 @@ static int copy_key(key_record *dst, const unsigned char *src, int len) {
     if (!dst->data) return -1;
     memcpy(dst->data, src, (size_t)len);
     dst->len = len;
+    return 0;
+}
+
+static uint64_t hash_key_bytes(const unsigned char *data, int len) {
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (int i = 0; i < len; ++i) {
+        hash ^= data[i];
+        hash *= UINT64_C(1099511628211);
+    }
+    hash ^= (uint64_t)len;
+    hash *= UINT64_C(1099511628211);
+    return hash;
+}
+
+static int same_key(const key_record *a, const key_record *b) {
+    return a->len == b->len && memcmp(a->data, b->data, (size_t)a->len) == 0;
+}
+
+static int deduplicate_keys(key_record *keys, uint64_t *count, uint64_t *duplicates) {
+    uint64_t capacity = 1;
+    while (capacity < (*count * 2u)) {
+        if (capacity > (UINT64_MAX / 2u)) return -1;
+        capacity *= 2u;
+    }
+
+    uint64_t *slots = (uint64_t*)malloc((size_t)capacity * sizeof(*slots));
+    if (!slots) return -1;
+    for (uint64_t i = 0; i < capacity; ++i) slots[i] = UINT64_MAX;
+
+    uint64_t write = 0;
+    uint64_t dup = 0;
+    for (uint64_t read = 0; read < *count; ++read) {
+        uint64_t slot = hash_key_bytes(keys[read].data, keys[read].len) & (capacity - 1u);
+        int found = 0;
+        while (slots[slot] != UINT64_MAX) {
+            if (same_key(&keys[slots[slot]], &keys[read])) {
+                found = 1;
+                break;
+            }
+            slot = (slot + 1u) & (capacity - 1u);
+        }
+
+        if (found) {
+            free(keys[read].data);
+            dup++;
+        } else {
+            if (write != read) keys[write] = keys[read];
+            slots[slot] = write++;
+        }
+    }
+
+    free(slots);
+    *count = write;
+    if (duplicates) *duplicates = dup;
     return 0;
 }
 
@@ -197,6 +252,26 @@ static int make_fixture_absent_keys(key_record **out, uint64_t n) {
     return 0;
 }
 
+static int make_late_absent_keys(key_record **out, const key_record *keys, uint64_t n) {
+    key_record *absent = (key_record*)calloc((size_t)n, sizeof(*absent));
+    if (!absent) return -1;
+
+    for (uint64_t i = 0; i < n; ++i) {
+        int len = keys[i].len + 1;
+        absent[i].data = (unsigned char*)malloc((size_t)len);
+        if (!absent[i].data) {
+            free_keys(absent, i);
+            return -1;
+        }
+        memcpy(absent[i].data, keys[i].data, (size_t)keys[i].len);
+        absent[i].data[len - 1] = 0xffu;
+        absent[i].len = len;
+    }
+
+    *out = absent;
+    return 0;
+}
+
 static int controlled_fanout_count(uint64_t groups, uint64_t fanout, uint64_t *out_n) {
     if (groups == 0 || fanout == 0 || fanout > 255) return -1;
     if (groups > (uint64_t)UINT32_MAX + UINT64_C(1)) return -1;
@@ -237,29 +312,43 @@ static int make_controlled_fanout_keys(key_record **out, uint64_t groups,
 
 static int load_workload(workload_kind workload, uint64_t requested_n, uint64_t seed,
                          uint64_t groups, uint64_t fanout, key_record **keys,
-                         key_record **absent, uint64_t *actual_n) {
+                         key_record **absent_early, key_record **absent_late,
+                         uint64_t *actual_n, uint64_t *duplicate_keys) {
+    int rc = -1;
+    *duplicate_keys = 0;
+
     switch (workload) {
         case WORKLOAD_DENSE_UINT64:
             *actual_n = requested_n;
-            return make_uint64_keys(keys, requested_n, seed, 0, 0) ||
-                   make_uint64_keys(absent, requested_n, seed, 0, 1);
+            rc = make_uint64_keys(keys, requested_n, seed, 0, 0) ||
+                 make_uint64_keys(absent_early, requested_n, seed, 0, 1);
+            break;
         case WORKLOAD_SPARSE_UINT64:
             *actual_n = requested_n;
-            return make_uint64_keys(keys, requested_n, seed, 1, 0) ||
-                   make_uint64_keys(absent, requested_n, seed ^ UINT64_C(0xd1b54a32d192ed03), 1, 1);
+            rc = make_uint64_keys(keys, requested_n, seed, 1, 0) ||
+                 make_uint64_keys(absent_early, requested_n, seed ^ UINT64_C(0xd1b54a32d192ed03), 1, 1);
+            break;
         case WORKLOAD_WORDS_FIXTURE:
             if (load_fixture_keys("tests/words.txt", requested_n, keys, actual_n) != 0) return -1;
-            return make_fixture_absent_keys(absent, *actual_n);
+            if (deduplicate_keys(*keys, actual_n, duplicate_keys) != 0) return -1;
+            rc = make_fixture_absent_keys(absent_early, *actual_n);
+            break;
         case WORKLOAD_UUID_FIXTURE:
             if (load_fixture_keys("tests/uuid.txt", requested_n, keys, actual_n) != 0) return -1;
-            return make_fixture_absent_keys(absent, *actual_n);
+            if (deduplicate_keys(*keys, actual_n, duplicate_keys) != 0) return -1;
+            rc = make_fixture_absent_keys(absent_early, *actual_n);
+            break;
         case WORKLOAD_CONTROLLED_FANOUT:
             if (controlled_fanout_count(groups, fanout, actual_n) != 0) return -1;
-            return make_controlled_fanout_keys(keys, groups, fanout, 0) ||
-                   make_controlled_fanout_keys(absent, groups, fanout, 1);
+            rc = make_controlled_fanout_keys(keys, groups, fanout, 0) ||
+                 make_controlled_fanout_keys(absent_early, groups, fanout, 1);
+            break;
         default:
             return -1;
     }
+
+    if (rc != 0) return -1;
+    return make_late_absent_keys(absent_late, *keys, *actual_n);
 }
 
 static const char *workload_name(workload_kind workload) {
@@ -359,7 +448,7 @@ static uint64_t fanout_range_sum(const art_stats *stats, int first, int last) {
 
 static int write_row(FILE *out, const bench_config *cfg, uint64_t actual_n, int run,
                      const char *operation, double seconds, uint64_t ops,
-                     const art_stats *stats) {
+                     const art_stats *stats, uint64_t duplicate_keys) {
     double mops = seconds > 0.0 ? ((double)ops / seconds) / 1000000.0 : 0.0;
     double bytes_per_key = stats->keys
         ? (double)stats->total_bytes / (double)stats->keys
@@ -376,7 +465,8 @@ static int write_row(FILE *out, const bench_config *cfg, uint64_t actual_n, int 
                    ",%.3f,%.3f,%" PRIu32
                    ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
                    ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
-                   ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "\n",
+                   ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
+                   ",%" PRIu64 ",%" PRIu64 "\n",
                    ART_BENCH_VARIANT, workload_name(cfg->workload), actual_n, cfg->seed,
                    cfg->fanout, cfg->groups, row_zipf_s, run,
                    operation, seconds, ops, mops, actual_n,
@@ -396,10 +486,12 @@ static int write_row(FILE *out, const bench_config *cfg, uint64_t actual_n, int 
                    stats->node2_bytes, stats->node5_bytes,
                    fanout_range_sum(stats, 1, 2),
                    fanout_range_sum(stats, 3, 5),
-                   fanout_range_sum(stats, 6, 16)) < 0 ? -1 : 0;
+                   fanout_range_sum(stats, 6, 16),
+                   stats->keys, duplicate_keys) < 0 ? -1 : 0;
 }
 
-static int run_one(const bench_config *cfg, FILE *out, key_record *keys, key_record *absent,
+static int run_one(const bench_config *cfg, FILE *out, key_record *keys,
+                   key_record *absent_early, key_record *absent_late,
                    uint64_t actual_n, int run) {
     uintptr_t *values = (uintptr_t*)calloc((size_t)actual_n, sizeof(*values));
     uint64_t *insert_order = (uint64_t*)malloc((size_t)actual_n * sizeof(*insert_order));
@@ -432,44 +524,62 @@ static int run_one(const bench_config *cfg, FILE *out, key_record *keys, key_rec
     int rc = -1;
 
     double start = now_seconds();
+    uint64_t insert_duplicates = 0;
     for (uint64_t i = 0; i < actual_n; ++i) {
         uint64_t idx = insert_order[i];
-        art_insert(&tree, keys[idx].data, keys[idx].len, &values[idx]);
+        if (art_insert(&tree, keys[idx].data, keys[idx].len, &values[idx])) {
+            insert_duplicates++;
+        }
     }
-    double seconds = now_seconds() - start;
-
-    art_stats stats;
-    if (art_collect_stats(&tree, &stats) != 0) goto cleanup;
-    if (write_row(out, cfg, actual_n, run, "insert", seconds, actual_n, &stats) != 0) goto cleanup;
+    double insert_seconds = now_seconds() - start;
+    uint64_t duplicate_keys = cfg->duplicate_keys + insert_duplicates;
 
     uintptr_t checksum = 0;
     start = now_seconds();
     for (uint64_t i = 0; i < actual_n; ++i) {
         uint64_t idx = lookup_order[i];
         void *value = art_search(&tree, keys[idx].data, keys[idx].len);
-        if (!value) {
-            fprintf(stderr, "successful lookup failed at index %" PRIu64 "\n", idx);
+        if ((insert_duplicates && !value) || (!insert_duplicates && value != &values[idx])) {
+            fprintf(stderr, "successful lookup returned wrong value at index %" PRIu64 "\n", idx);
             goto cleanup;
         }
         checksum ^= (uintptr_t)value;
     }
-    seconds = now_seconds() - start;
+    double lookup_seconds = now_seconds() - start;
     bench_sink ^= checksum;
-    if (write_row(out, cfg, actual_n, run, "lookup_success", seconds, actual_n, &stats) != 0) goto cleanup;
 
     checksum = 0;
     start = now_seconds();
     for (uint64_t i = 0; i < actual_n; ++i) {
-        void *value = art_search(&tree, absent[i].data, absent[i].len);
+        void *value = art_search(&tree, absent_early[i].data, absent_early[i].len);
         if (value) {
-            fprintf(stderr, "absent lookup unexpectedly found a value at index %" PRIu64 "\n", i);
+            fprintf(stderr, "early absent lookup unexpectedly found a value at index %" PRIu64 "\n", i);
             goto cleanup;
         }
         checksum ^= (uintptr_t)value;
     }
-    seconds = now_seconds() - start;
+    double absent_early_seconds = now_seconds() - start;
     bench_sink ^= checksum;
-    if (write_row(out, cfg, actual_n, run, "lookup_absent", seconds, actual_n, &stats) != 0) goto cleanup;
+
+    checksum = 0;
+    start = now_seconds();
+    for (uint64_t i = 0; i < actual_n; ++i) {
+        void *value = art_search(&tree, absent_late[i].data, absent_late[i].len);
+        if (value) {
+            fprintf(stderr, "late absent lookup unexpectedly found a value at index %" PRIu64 "\n", i);
+            goto cleanup;
+        }
+        checksum ^= (uintptr_t)value;
+    }
+    double absent_late_seconds = now_seconds() - start;
+    bench_sink ^= checksum;
+
+    art_stats stats;
+    if (art_collect_stats(&tree, &stats) != 0) goto cleanup;
+    if (write_row(out, cfg, actual_n, run, "insert", insert_seconds, actual_n, &stats, duplicate_keys) != 0) goto cleanup;
+    if (write_row(out, cfg, actual_n, run, "lookup_success", lookup_seconds, actual_n, &stats, duplicate_keys) != 0) goto cleanup;
+    if (write_row(out, cfg, actual_n, run, "lookup_absent_early", absent_early_seconds, actual_n, &stats, duplicate_keys) != 0) goto cleanup;
+    if (write_row(out, cfg, actual_n, run, "lookup_absent_late", absent_late_seconds, actual_n, &stats, duplicate_keys) != 0) goto cleanup;
 
     rc = 0;
 
@@ -553,13 +663,15 @@ int main(int argc, char **argv) {
     }
 
     key_record *keys = NULL;
-    key_record *absent = NULL;
+    key_record *absent_early = NULL;
+    key_record *absent_late = NULL;
     uint64_t actual_n = 0;
     if (load_workload(cfg.workload, cfg.n, cfg.seed, cfg.groups, cfg.fanout,
-            &keys, &absent, &actual_n) != 0) {
+            &keys, &absent_early, &absent_late, &actual_n, &cfg.duplicate_keys) != 0) {
         fprintf(stderr, "failed to load workload %s\n", workload_name(cfg.workload));
         free_keys(keys, actual_n);
-        free_keys(absent, actual_n);
+        free_keys(absent_early, actual_n);
+        free_keys(absent_late, actual_n);
         return 1;
     }
 
@@ -568,7 +680,8 @@ int main(int argc, char **argv) {
     if (!out) {
         fprintf(stderr, "failed to open output %s: %s\n", cfg.out_path, strerror(errno));
         free_keys(keys, actual_n);
-        free_keys(absent, actual_n);
+        free_keys(absent_early, actual_n);
+        free_keys(absent_late, actual_n);
         return 1;
     }
     if (needs_header) {
@@ -580,12 +693,12 @@ int main(int argc, char **argv) {
                 "fanout_17_32,fanout_33_48,fanout_49_64,fanout_65_256,"
                 "node64,node4_bytes,node16_bytes,node32_bytes,node48_bytes,"
                 "node64_bytes,node256_bytes,node2,node5,node2_bytes,node5_bytes,"
-                "fanout_1_2,fanout_3_5,fanout_6_16\n");
+                "fanout_1_2,fanout_3_5,fanout_6_16,unique_keys,duplicate_keys\n");
     }
 
     int rc = 0;
     for (int run = 0; run < cfg.runs; ++run) {
-        if (run_one(&cfg, out, keys, absent, actual_n, run) != 0) {
+        if (run_one(&cfg, out, keys, absent_early, absent_late, actual_n, run) != 0) {
             rc = 1;
             break;
         }
@@ -593,6 +706,7 @@ int main(int argc, char **argv) {
 
     fclose(out);
     free_keys(keys, actual_n);
-    free_keys(absent, actual_n);
+    free_keys(absent_early, actual_n);
+    free_keys(absent_late, actual_n);
     return rc;
 }

@@ -214,7 +214,7 @@ static inline uint8_t art_menu_next_type(uint8_t type) {
 #endif
 }
 
-static inline uint8_t art_menu_shrink_type(uint8_t type, uint8_t child_count) {
+static inline uint8_t art_menu_shrink_type(uint8_t type, uint16_t child_count) {
 #if defined(ART_MENU_NODE256_ONLY) || defined(ART_MENU_COUNT1_NODE256)
     (void)type;
     (void)child_count;

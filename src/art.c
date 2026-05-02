@@ -306,6 +306,10 @@ void *art_search(const art_tree *t, const unsigned char *key, int key_len) {
     art_node *n = t->root;
     int depth = 0;
 
+    if (key_len < 0) {
+        return NULL;
+    }
+
     while (n) {
         // Might be a leaf.
         if (IS_LEAF(n)) {
@@ -325,6 +329,9 @@ void *art_search(const art_tree *t, const unsigned char *key, int key_len) {
         }
 
         // Recursively search.
+        if (depth >= key_len) {
+            return NULL;
+        }
         child = art_find_child(n, key[depth]);
         n = child ? *child : NULL;
         depth++;
@@ -362,6 +369,13 @@ static void *recursive_insert(art_node *n, art_node **ref, const unsigned char *
 
         // Determine longest prefix.
         int longest_prefix = longest_common_prefix(l, l2, depth);
+        if (depth + longest_prefix >= key_len ||
+                depth + longest_prefix >= (int)l->key_len) {
+            *old = 1;
+            free(new_node);
+            free(l2);
+            return NULL;
+        }
         new_node->partial_len = longest_prefix;
         memcpy(new_node->partial, key + depth, art_min_int(MAX_PREFIX_LEN, longest_prefix));
 
@@ -380,6 +394,10 @@ static void *recursive_insert(art_node *n, art_node **ref, const unsigned char *
         if ((uint32_t)prefix_diff >= n->partial_len) {
             depth += n->partial_len;
             goto RECURSE_SEARCH;
+        }
+        if (depth + prefix_diff >= key_len) {
+            *old = 1;
+            return NULL;
         }
 
         // Create a new node.
@@ -411,6 +429,10 @@ static void *recursive_insert(art_node *n, art_node **ref, const unsigned char *
 RECURSE_SEARCH:;
 
     // Find a child to recurse to.
+    if (depth >= key_len) {
+        *old = 1;
+        return NULL;
+    }
     art_node **child = art_find_child(n, key[depth]);
     if (child) {
         return recursive_insert(*child, child, key, key_len, value, depth + 1, old, replace);
@@ -432,6 +454,10 @@ RECURSE_SEARCH:;
  * the old value pointer is returned.
  */
 void *art_insert(art_tree *t, const unsigned char *key, int key_len, void *value) {
+    if (key_len < 0) {
+        return NULL;
+    }
+
     int old = 0;
     void *old_val = recursive_insert(t->root, &t->root, key, key_len, value, 0, &old, 1);
     if (!old) {
@@ -450,6 +476,10 @@ void *art_insert(art_tree *t, const unsigned char *key, int key_len, void *value
  * the old value pointer is returned.
  */
 void *art_insert_no_replace(art_tree *t, const unsigned char *key, int key_len, void *value) {
+    if (key_len < 0) {
+        return NULL;
+    }
+
     int old = 0;
     void *old_val = recursive_insert(t->root, &t->root, key, key_len, value, 0, &old, 0);
     if (!old) {
@@ -488,6 +518,9 @@ static int recursive_delete(art_node *n, art_node **ref, const unsigned char *ke
     }
 
     // Find child node.
+    if (depth >= key_len) {
+        return 0;
+    }
     art_node **child = art_find_child(n, key[depth]);
     if (!child) {
         return 0;
@@ -519,6 +552,10 @@ static int recursive_delete(art_node *n, art_node **ref, const unsigned char *ke
  * the value pointer is returned.
  */
 void *art_delete(art_tree *t, const unsigned char *key, int key_len) {
+    if (key_len < 0) {
+        return NULL;
+    }
+
     void *value = NULL;
     int deleted = recursive_delete(t->root, &t->root, key, key_len, 0, &value);
     if (deleted) {

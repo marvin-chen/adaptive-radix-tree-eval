@@ -96,7 +96,10 @@ children[32]
 ```
 
 It delays promotion from Node16 to Node48 for fanouts 17-32. This can save
-memory, but lookup requires key comparison rather than direct indexing.
+memory, but lookup requires key comparison rather than direct indexing. Lookup
+uses two SSE equality checks when available. Insertion uses an unsigned SIMD
+ordered-position search when available, then shifts the compact key/child arrays
+to make room.
 
 Added `Node64Indexed`:
 
@@ -107,6 +110,10 @@ children[64]
 
 It covers fanouts 49-64 and uses direct indexed lookup like Node48. This is the
 current Node64 representation used by all active Node64 variants.
+
+Node48 and Node64Indexed insertion first try `num_children` as the next compact
+child slot, which is the common case for build-only workloads, and fall back to
+scanning for a free slot after deletions.
 
 Added `Node2` and `Node5`:
 
@@ -212,13 +219,33 @@ Each benchmark records:
 ```text
 - insert
 - successful lookup
-- absent lookup
+- early absent lookup
+- late absent lookup
 ```
 
-Successful lookup can use uniform shuffled access or Zipf-skewed access.
+Successful lookup can use uniform shuffled access or Zipf-skewed access. Early
+absent lookup uses the preexisting missing-key generators. Late absent lookup
+copies an existing key and appends one extra byte, forcing the search to follow
+an existing path to the leaf before failing.
+
+Benchmark CSVs also report `unique_keys` and `duplicate_keys`. Fixture workloads
+are deduplicated at load time; generated workloads report any duplicate inserts
+that occur.
 
 `scripts/run_benchmarks.py` runs sweeps over variants, workloads, sizes,
 fanouts, groups, and Zipf parameters.
+
+## Scan Benchmark Pipeline
+
+Added `bench/bench_scan.c` as a separate iteration benchmark. It measures:
+
+```text
+- full ordered iteration with art_iter
+- prefix iteration with art_iter_prefix
+```
+
+The reported throughput is visitation throughput, not lookup throughput:
+`mops_per_sec` means visited entries per second.
 
 ## Structural Stats
 
@@ -239,7 +266,8 @@ Stats include:
 - maximum leaf depth
 ```
 
-Memory uses actual `sizeof(...)` values, not paper-theoretical sizes.
+Memory is logical implementation memory: internal nodes use actual
+`sizeof(node_type)` values and leaves use `sizeof(art_leaf) + key_len`.
 
 ## Correctness Tests
 
